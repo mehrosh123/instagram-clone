@@ -1,0 +1,151 @@
+/*
+  THEORY: Header Styling with Sticky Positioning
+  ================================================
+  - position: sticky keeps element fixed while scrolling
+  - z-index determines layering (higher = on top)
+  - Flexbox centers and spaces items horizontally
+*/
+
+.header {
+  background: white;
+  border-bottom: 1px solid var(--border-color);
+  padding: 16px 20px;
+  position: sticky;
+  top: 0;
+  z-index: 100;
+  box-shadow: var(--shadow);
+}
+
+.header-container {
+  max-width: 1400px;
+  margin: 0 auto;
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 20px;
+}
+
+/* Logo */
+.logo {
+  flex-shrink: 0;
+}
+
+.logo h1 {
+  font-size: 24px;
+  font-weight: 700;
+  margin: 0;
+  cursor: pointer;
+}
+
+/* Search Input */
+.search-container {
+  position: relative;
+  flex: 1;
+  max-width: 300px;
+}
+
+.search-input {
+  width: 100%;
+  padding: 8px 12px 8px 32px;
+  border: 1px solid var(--border-color);
+  border-radius: 24px;
+  font-size: 14px;
+  background: var(--light-bg);
+  transition: border-color 0.3s;
+}
+
+.search-input:focus {
+  outline: none;
+  border-color: var(--primary-color);
+  background: white;
+}
+
+.search-icon {
+  position: absolute;
+  left: 10px;
+  top: 50%;
+  transform: translateY(-50%);
+  color: #999;
+}
+
+/* Header Navigation */
+.header-nav {
+  display: flex;
+  align-items: center;
+  gap: 20px;
+}
+
+.nav-btn {
+  font-size: 20px;
+  padding: 8px;
+  border-radius: 50%;
+  transition: background-color 0.2s;
+  cursor: pointer;
+  position: relative;
+}
+
+.nav-btn:hover {
+  background-color: var(--hover-bg);
+}
+
+.profile-btn {
+  width: 40px;
+  height: 40px;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+}
+
+.header-profile-image {
+  width: 28px;
+  height: 28px;
+  border-radius: 50%;
+  object-fit: cover;
+  border: 1px solid var(--border-color);
+}
+
+.header-profile-fallback {
+  width: 28px;
+  height: 28px;
+  border-radius: 50%;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  font-size: 11px;
+  font-weight: 700;
+  background: var(--light-bg);
+  color: var(--text-color);
+  border: 1px solid var(--border-color);
+}
+
+/* Notification Badge */
+.notification-badge {
+  position: absolute;
+  top: 0;
+  right: 0;
+  background: #ff3a30;
+  color: white;
+  border-radius: 50%;
+  width: 16px;
+  height: 16px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  font-size: 11px;
+  font-weight: 600;
+}
+
+/* Responsive */
+@media (max-width: 768px) {
+  .search-container {
+    display: none;
+  }
+  
+  .header-container {
+    gap: 10px;
+  }
+
+  .header-nav {
+    gap: 10px;
+  }
+}

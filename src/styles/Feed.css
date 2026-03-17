@@ -1,0 +1,101 @@
+/*
+  THEORY: Feed Container - Dynamic Lists
+  ========================================
+  - Flexbox column creates vertical stack of posts
+  - gap creates spacing between items
+  - flex: 1 makes feed fill available space
+*/
+
+.feed {
+  display: flex;
+  flex-direction: column;
+  gap: 20px;
+  padding: 20px 0;
+}
+
+.feed-container {
+  display: flex;
+  flex-direction: column;
+  gap: 20px;
+}
+
+.feed-title {
+  font-size: 24px;
+  font-weight: 700;
+  margin-bottom: 10px;
+  padding: 0 0 10px;
+  border-bottom: 1px solid var(--border-color);
+}
+
+.create-post-form {
+  background: white;
+  border: 1px solid var(--border-color);
+  border-radius: 8px;
+  padding: 12px;
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+}
+
+.create-post-form h3 {
+  margin: 0;
+  font-size: 15px;
+}
+
+.create-post-form textarea,
+.create-post-form input {
+  border: 1px solid var(--border-color);
+  border-radius: 6px;
+  padding: 10px;
+  font-size: 14px;
+}
+
+.create-post-form button {
+  align-self: flex-start;
+  background: var(--primary-color);
+  color: white;
+  border-radius: 6px;
+  padding: 8px 16px;
+  font-weight: 600;
+}
+
+.feed-error {
+  margin: 0;
+  color: #ff3a30;
+  font-size: 13px;
+}
+
+/* Empty State */
+.feed-empty {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  padding: 60px 20px;
+  text-align: center;
+}
+
+.feed-empty p {
+  color: #999;
+  font-size: 14px;
+}
+
+/* Loading Animation */
+@keyframes skeleton {
+  0% {
+    background-color: var(--light-bg);
+  }
+  50% {
+    background-color: var(--hover-bg);
+  }
+  100% {
+    background-color: var(--light-bg);
+  }
+}
+
+.post-skeleton {
+  animation: skeleton 1.5s infinite;
+  height: 400px;
+  border-radius: 8px;
+  margin-bottom: 20px;
+}

@@ -1,0 +1,147 @@
+/* 
+  THEORY: CSS Grid and Flexbox
+  =============================
+  Modern CSS layout techniques:
+  
+  1. FLEXBOX: For 1D layouts (rows or columns)
+     - display: flex
+     - justify-content: align items horizontally
+     - align-items: align items vertically
+     
+  2. CSS GRID: For 2D layouts (rows and columns)
+     - display: grid
+     - grid-template-columns: define column widths
+     - grid-template-areas: define layout regions
+     
+  3. RESPONSIVE DESIGN: Using media queries
+     - @media (max-width: 768px)
+     - Adapts layout for different screen sizes
+*/
+
+/* Global Styles */
+:root {
+  --primary-color: #0095f6;
+  --secondary-color: #262626;
+  --border-color: #dbdbdb;
+  --text-color: #262626;
+  --light-bg: #fafafa;
+  --hover-bg: #f0f0f0;
+  --shadow: 0 1px 3px rgba(0, 0, 0, 0.12);
+  --shadow-lg: 0 4px 20px rgba(0, 0, 0, 0.15);
+}
+
+* {
+  margin: 0;
+  padding: 0;
+  box-sizing: border-box;
+}
+
+body {
+  font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Helvetica, Arial, sans-serif;
+  color: var(--text-color);
+  background-color: var(--light-bg);
+}
+
+/* 
+  THEORY: App Layout Structure
+  =============================
+  Using CSS Grid for main layout:
+  - Header spans full width (top)
+  - Sidebar on left (fixed width)
+  - Main content in center
+  - Right sidebar for suggestions
+*/
+.app {
+  display: flex;
+  flex-direction: column;
+  height: 100vh;
+}
+
+.app-body {
+  display: grid;
+  grid-template-columns: 260px 1fr 320px;
+  gap: 30px;
+  padding: 0 20px;
+  max-width: 1400px;
+  margin: 0 auto;
+  width: 100%;
+  flex: 1;
+  overflow: hidden;
+}
+
+.main-content {
+  overflow-y: auto;
+  max-width: 600px;
+  margin: 0 auto;
+  width: 100%;
+}
+
+.sidebar-right {
+  padding: 20px;
+  background: white;
+  border-radius: 8px;
+  box-shadow: var(--shadow);
+}
+
+/* Responsiveness */
+@media (max-width: 1200px) {
+  .app-body {
+    grid-template-columns: 260px 1fr;
+  }
+  .sidebar-right {
+    display: none;
+  }
+}
+
+@media (max-width: 768px) {
+  .app-body {
+    grid-template-columns: 1fr;
+    gap: 0;
+    padding: 0;
+  }
+  .main-content {
+    max-width: 100%;
+  }
+}
+
+/* Scrollbar Styling */
+::-webkit-scrollbar {
+  width: 8px;
+}
+
+::-webkit-scrollbar-track {
+  background: transparent;
+}
+
+::-webkit-scrollbar-thumb {
+  background: #ccc;
+  border-radius: 4px;
+}
+
+::-webkit-scrollbar-thumb:hover {
+  background: #999;
+}
+
+/* Button Resets */
+button {
+  border: none;
+  cursor: pointer;
+  background: none;
+  font-family: inherit;
+}
+
+/* Animation */
+@keyframes fadeIn {
+  from {
+    opacity: 0;
+    transform: translateY(10px);
+  }
+  to {
+    opacity: 1;
+    transform: translateY(0);
+  }
+}
+
+.post {
+  animation: fadeIn 0.3s ease-out;
+}

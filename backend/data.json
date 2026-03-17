@@ -1,0 +1,26 @@
+{
+  "users": [
+    {
+      "id": "673cc79f-6412-40bb-9e08-859c2629f104",
+      "email": "biologist783@gmail.com",
+      "username": "mehrosh",
+      "passwordHash": "$2b$10$HIa1YyoXzyku9nRDTVSV5.UVO8Rv9TxA3Q50SpRdYB9/yzC2PqBfu",
+      "fullName": "Biolo Gist",
+      "bio": "",
+      "website": "",
+      "profilePicture": "",
+      "isPrivate": false,
+      "isVerified": false,
+      "followerCount": 0,
+      "followingCount": 0,
+      "createdAt": "2026-03-17T17:31:07.652Z",
+      "updatedAt": "2026-03-17T17:31:07.652Z",
+      "deletedAt": null
+    }
+  ],
+  "posts": [],
+  "comments": [],
+  "likes": [],
+  "follows": [],
+  "stories": []
+}

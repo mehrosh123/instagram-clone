@@ -1,0 +1,264 @@
+/* Followers Component Styling */
+
+/* Follow Button */
+.follow-btn {
+  padding: 8px 24px;
+  background: var(--primary-color);
+  color: white;
+  border: none;
+  border-radius: 4px;
+  font-size: 13px;
+  font-weight: 600;
+  cursor: pointer;
+  transition: all 0.2s;
+}
+
+.follow-btn:hover:not(:disabled) {
+  background: #0080d0;
+  transform: translateY(-2px);
+  box-shadow: 0 4px 12px rgba(0, 149, 246, 0.4);
+}
+
+.follow-btn.following {
+  background: transparent;
+  color: var(--text-color);
+  border: 1px solid var(--border-color);
+}
+
+.follow-btn.following:hover {
+  background: var(--hover-bg);
+}
+
+.follow-btn.pending {
+  opacity: 0.6;
+  cursor: wait;
+}
+
+.follow-btn:disabled {
+  opacity: 0.5;
+  cursor: not-allowed;
+}
+
+.error-tooltip {
+  display: block;
+  font-size: 10px;
+  color: #ff3a30;
+  margin-top: 2px;
+}
+
+/* Followers List */
+.followers-list,
+.following-list,
+.follow-requests {
+  background: white;
+  border: 1px solid var(--border-color);
+  border-radius: 8px;
+  overflow: hidden;
+}
+
+.followers-header,
+.following-header,
+.requests-header {
+  padding: 16px;
+  border-bottom: 1px solid var(--border-color);
+}
+
+.followers-header h3,
+.following-header h3,
+.requests-header h3 {
+  font-size: 16px;
+  font-weight: 600;
+  margin: 0;
+}
+
+.followers-container,
+.following-container,
+.requests-list {
+  max-height: 400px;
+  overflow-y: auto;
+}
+
+/* Follower Card */
+.follower-card,
+.following-card,
+.request-card {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  padding: 12px 16px;
+  border-bottom: 1px solid var(--light-bg);
+  transition: background-color 0.2s;
+}
+
+.follower-card:hover,
+.following-card:hover,
+.request-card:hover {
+  background-color: var(--light-bg);
+}
+
+.follower-card:last-child,
+.following-card:last-child,
+.request-card:last-child {
+  border-bottom: none;
+}
+
+.follower-info,
+.following-info,
+.request-info {
+  display: flex;
+  gap: 12px;
+  align-items: center;
+  flex: 1;
+  min-width: 0;
+}
+
+.follower-avatar,
+.following-avatar,
+.request-avatar {
+  width: 40px;
+  height: 40px;
+  border-radius: 50%;
+  object-fit: cover;
+  flex-shrink: 0;
+}
+
+.follower-details,
+.following-details,
+.request-details {
+  flex: 1;
+  min-width: 0;
+}
+
+.follower-username,
+.following-username,
+.request-username {
+  font-size: 13px;
+  font-weight: 600;
+  color: var(--text-color);
+  margin: 0;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+.follower-name,
+.following-name,
+.request-name {
+  font-size: 12px;
+  color: #999;
+  margin: 2px 0 0;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+/* Follower Actions */
+.follower-actions,
+.request-actions {
+  display: flex;
+  gap: 8px;
+}
+
+.msg-btn,
+.remove-btn,
+.approve-btn,
+.reject-btn {
+  padding: 6px 10px;
+  border: 1px solid var(--border-color);
+  background: transparent;
+  border-radius: 4px;
+  cursor: pointer;
+  font-size: 13px;
+  transition: all 0.2s;
+}
+
+.msg-btn:hover {
+  background: var(--light-bg);
+  border-color: var(--primary-color);
+  color: var(--primary-color);
+}
+
+.remove-btn:hover,
+.reject-btn:hover {
+  background: rgba(255, 58, 48, 0.1);
+  border-color: #ff3a30;
+  color: #ff3a30;
+}
+
+.approve-btn {
+  background: var(--light-bg);
+  color: #34C759;
+  border-color: #34C759;
+}
+
+.approve-btn:hover {
+  background: rgba(52, 199, 89, 0.1);
+}
+
+.unfollow-btn {
+  padding: 8px 16px;
+  background: transparent;
+  border: 1px solid var(--border-color);
+  border-radius: 4px;
+  color: var(--text-color);
+  font-size: 13px;
+  font-weight: 600;
+  cursor: pointer;
+  transition: all 0.2s;
+}
+
+.unfollow-btn:hover {
+  background: var(--hover-bg);
+  border-color: var(--primary-color);
+  color: var(--primary-color);
+}
+
+/* Empty State */
+.empty-state {
+  text-align: center;
+  padding: 40px 16px;
+  color: #999;
+  font-size: 13px;
+}
+
+/* Scrollbar */
+.followers-container::-webkit-scrollbar,
+.following-container::-webkit-scrollbar,
+.requests-list::-webkit-scrollbar {
+  width: 6px;
+}
+
+.followers-container::-webkit-scrollbar-thumb,
+.following-container::-webkit-scrollbar-thumb,
+.requests-list::-webkit-scrollbar-thumb {
+  background: var(--border-color);
+  border-radius: 3px;
+}
+
+.followers-container::-webkit-scrollbar-thumb:hover,
+.following-container::-webkit-scrollbar-thumb:hover,
+.requests-list::-webkit-scrollbar-thumb:hover {
+  background: #999;
+}
+
+/* Responsive */
+@media (max-width: 600px) {
+  .follower-card,
+  .following-card,
+  .request-card {
+    padding: 10px 12px;
+  }
+
+  .follower-avatar,
+  .following-avatar,
+  .request-avatar {
+    width: 36px;
+    height: 36px;
+  }
+
+  .msg-btn,
+  .remove-btn {
+    padding: 4px 8px;
+    font-size: 12px;
+  }
+}
