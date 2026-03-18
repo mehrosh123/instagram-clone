@@ -16,6 +16,23 @@
       "createdAt": "2026-03-17T17:31:07.652Z",
       "updatedAt": "2026-03-17T17:31:07.652Z",
       "deletedAt": null
+    },
+    {
+      "id": "b42e2c54-07d2-43b8-a1fc-08c2527c0f49",
+      "email": "biologist785@gmail.com",
+      "username": "rosh",
+      "passwordHash": "$2b$10$F.g/9tXhBiOAdQMOm4slu.FIvxr.9fDE6Vw0Zp48xFfkzAKvIdOe6",
+      "fullName": "Biolo",
+      "bio": "",
+      "website": "",
+      "profilePicture": "",
+      "isPrivate": false,
+      "isVerified": false,
+      "followerCount": 0,
+      "followingCount": 0,
+      "createdAt": "2026-03-18T16:29:52.633Z",
+      "updatedAt": "2026-03-18T16:29:52.633Z",
+      "deletedAt": null
     }
   ],
   "posts": [

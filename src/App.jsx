@@ -5,6 +5,7 @@ import Profile from './components/Profile'
 import Sidebar from './components/Sidebar'
 import Login from './components/Login'
 import Signup from './components/Signup'
+import SplashScreen from './components/SplashScreen'
 import FollowButton from './components/Followers'
 import { useAuth } from './context/AuthContext'
 import { apiFetch } from './api/client'
@@ -47,9 +48,34 @@ function App() {
   const [authPage, setAuthPage] = useState('signup')
   const [selectedUsername, setSelectedUsername] = useState('')
   const [selectedUserData, setSelectedUserData] = useState(null)
+  const [isSplashDone, setIsSplashDone] = useState(false)
+  const [isAuthChecked, setIsAuthChecked] = useState(false)
 
   useEffect(() => {
-    checkAuth()
+    let isMounted = true
+
+    const timerId = setTimeout(() => {
+      if (isMounted) {
+        setIsSplashDone(true)
+      }
+    }, 1400)
+
+    const initializeAuth = async () => {
+      try {
+        await checkAuth()
+      } finally {
+        if (isMounted) {
+          setIsAuthChecked(true)
+        }
+      }
+    }
+
+    initializeAuth()
+
+    return () => {
+      isMounted = false
+      clearTimeout(timerId)
+    }
   }, [checkAuth])
 
   useEffect(() => {
@@ -78,6 +104,10 @@ function App() {
     } catch (err) {
       console.error('Failed to load user profile:', err)
     }
+  }
+
+  if (!isSplashDone || !isAuthChecked) {
+    return <SplashScreen />
   }
 
   if (!isAuthenticated) {

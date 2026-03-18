@@ -146,3 +146,44 @@ button {
 .post {
   animation: fadeIn 0.3s ease-out;
 }
+
+.splash-screen {
+  min-height: 100vh;
+  width: 100%;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  background: #fff;
+}
+
+.splash-content {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 14px;
+}
+
+.splash-content .brand-logo-image,
+.splash-content .brand-fallback {
+  width: 84px;
+  height: 84px;
+  border-radius: 18px;
+  animation: splashPulse 1.1s ease-in-out infinite alternate;
+}
+
+.splash-text {
+  font-size: 13px;
+  color: #8e8e8e;
+  letter-spacing: 0.3px;
+}
+
+@keyframes splashPulse {
+  from {
+    transform: scale(0.98);
+    opacity: 0.85;
+  }
+  to {
+    transform: scale(1.02);
+    opacity: 1;
+  }
+}
