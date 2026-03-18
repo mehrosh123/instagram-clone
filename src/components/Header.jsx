@@ -1,4 +1,5 @@
 import Search from './Search'
+import BrandLogo from './BrandLogo'
 import '../styles/Header.css'
 
 /**
@@ -24,7 +25,7 @@ export default function Header({ onNavigate, currentUser, onSearchSelectUser }) 
       <div className="header-container">
         {/* Logo */}
         <div className="logo">
-          <h1>📷 InstaClone</h1>
+          <BrandLogo compact imageOnly />
         </div>
 
         {/* Search bar */}

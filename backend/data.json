@@ -18,9 +18,51 @@
       "deletedAt": null
     }
   ],
-  "posts": [],
+  "posts": [
+    {
+      "id": "ffa04624-fa30-4edc-bd62-822cde132e6e",
+      "userId": "673cc79f-6412-40bb-9e08-859c2629f104",
+      "caption": "",
+      "images": [
+        "https://images.pexels.com/photos/162173/panthera-tigris-altaica-tiger-siberian-amurtiger-162173.jpeg?cs=srgb&dl=pexels-pixabay-162173.jpg&fm=jpg"
+      ],
+      "likesCount": 1,
+      "commentsCount": 0,
+      "isEdited": false,
+      "createdAt": "2026-03-17T19:31:30.063Z",
+      "updatedAt": "2026-03-17T19:31:30.063Z",
+      "deletedAt": null
+    }
+  ],
   "comments": [],
-  "likes": [],
+  "likes": [
+    {
+      "id": "b77043af-8685-46f7-86fa-4cf292143a70",
+      "userId": "673cc79f-6412-40bb-9e08-859c2629f104",
+      "postId": "ffa04624-fa30-4edc-bd62-822cde132e6e",
+      "commentId": null,
+      "createdAt": "2026-03-17T19:31:47.306Z"
+    }
+  ],
   "follows": [],
-  "stories": []
+  "stories": [
+    {
+      "id": "ef08d490-2168-435f-a95e-c399abd5b633",
+      "userId": "673cc79f-6412-40bb-9e08-859c2629f104",
+      "imageUrl": "https://images.pexels.com/photos/162173/panthera-tigris-altaica-tiger-siberian-amurtiger-162173.jpeg?cs=srgb&dl=pexels-pixabay-162173.jpg&fm=jpg",
+      "caption": "",
+      "createdAt": "2026-03-17T19:34:56.960Z",
+      "expiresAt": "2026-03-18T19:34:56.960Z",
+      "deletedAt": "2026-03-17T19:37:18.480Z"
+    },
+    {
+      "id": "61bfa120-6a0f-4504-a47d-2d9ec452d4d3",
+      "userId": "673cc79f-6412-40bb-9e08-859c2629f104",
+      "imageUrl": "https://images.pexels.com/photos/162173/panthera-tigris-altaica-tiger-siberian-amurtiger-162173.jpeg?cs=srgb&dl=pexels-pixabay-162173.jpg&fm=jpg",
+      "caption": "",
+      "createdAt": "2026-03-17T19:37:13.228Z",
+      "expiresAt": "2026-03-18T19:37:13.228Z",
+      "deletedAt": null
+    }
+  ]
 }

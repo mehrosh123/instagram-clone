@@ -12,7 +12,8 @@ const JWT_SECRET = process.env.JWT_SECRET || 'demo-secret-change-in-production'
 const DATA_FILE = path.join(process.cwd(), 'backend', 'data.json')
 
 app.use(cors({ origin: ['http://localhost:5173'], credentials: true }))
-app.use(express.json({ limit: '2mb' }))
+app.use(express.json({ limit: '10mb' }))
+app.use(express.urlencoded({ extended: true, limit: '10mb' }))
 
 function readDb() {
   const raw = fs.readFileSync(DATA_FILE, 'utf8')

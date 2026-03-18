@@ -23,6 +23,16 @@
   margin-bottom: 30px;
 }
 
+.auth-header .brand-logo {
+  justify-content: center;
+}
+
+.auth-header .brand-logo-image {
+  width: 72px;
+  height: 72px;
+  border-radius: 16px;
+}
+
 .auth-header h1 {
   font-size: 32px;
   margin: 0 0 10px;
@@ -195,6 +205,12 @@
 @media (max-width: 480px) {
   .auth-card {
     padding: 24px;
+  }
+
+  .auth-header .brand-logo-image {
+    width: 60px;
+    height: 60px;
+    border-radius: 14px;
   }
 
   .auth-header h1 {

@@ -1,4 +1,4 @@
-import { useState, useCallback, useEffect } from 'react'
+import { useState, useCallback, useEffect, useRef } from 'react'
 import { apiFetch } from '../api/client'
 import '../styles/Search.css'
 
@@ -29,6 +29,7 @@ import '../styles/Search.css'
  */
 
 export default function Search({ onSelectUser }) {
+  const inputRef = useRef(null)
   const [query, setQuery] = useState('')
   const [results, setResults] = useState([])
   const [isLoading, setIsLoading] = useState(false)
@@ -215,6 +216,7 @@ export default function Search({ onSelectUser }) {
     <div className="search-component">
       <div className="search-box">
         <input
+          ref={inputRef}
           type="text"
           placeholder="Search users..."
           value={query}
@@ -222,7 +224,17 @@ export default function Search({ onSelectUser }) {
           onFocus={() => setShowResults(!!query)}
           className="search-input-field"
         />
-        <span className="search-icon">🔍</span>
+        <button
+          type="button"
+          className="search-icon-btn"
+          onClick={() => {
+            inputRef.current?.focus()
+            setShowResults(true)
+          }}
+          aria-label="Open search"
+        >
+          <span className="search-icon-glyph">🔍</span>
+        </button>
       </div>
 
       {showResults && (

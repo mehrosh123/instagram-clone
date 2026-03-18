@@ -98,6 +98,7 @@ body {
     grid-template-columns: 1fr;
     gap: 0;
     padding: 0;
+    padding-bottom: 72px;
   }
   .main-content {
     max-width: 100%;

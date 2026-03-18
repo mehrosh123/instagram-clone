@@ -1,0 +1,76 @@
+.brand-logo {
+  display: inline-flex;
+  align-items: center;
+  gap: 8px;
+}
+
+.brand-logo-image {
+  width: 30px;
+  height: 30px;
+  border-radius: 8px;
+  object-fit: contain;
+  background: #fff;
+  border: 1px solid var(--border-color);
+  display: block;
+}
+
+.brand-fallback {
+  width: 30px;
+  height: 30px;
+  border-radius: 8px;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  font-size: 11px;
+  font-weight: 700;
+  color: #fff;
+  background: radial-gradient(circle at 30% 30%, #ffd16f 0%, #ff9f43 30%, #f56040 55%, #c13584 78%, #833ab4 100%);
+}
+
+.brand-wordmark {
+  font-family: 'Grand Hotel', 'Brush Script MT', 'Segoe Script', cursive;
+  font-size: 36px;
+  line-height: 1;
+  color: #262626;
+  letter-spacing: 0.1px;
+}
+
+.brand-logo.compact .brand-logo-image {
+  width: 26px;
+  height: 26px;
+  border-radius: 7px;
+}
+
+.brand-logo.compact .brand-fallback {
+  width: 26px;
+  height: 26px;
+  border-radius: 7px;
+}
+
+.brand-logo.compact .brand-wordmark {
+  font-size: 31px;
+}
+
+.brand-logo.wordmark-only {
+  gap: 0;
+}
+
+@media (max-width: 600px) {
+  .brand-wordmark {
+    font-size: 32px;
+  }
+
+  .brand-logo.compact .brand-wordmark {
+    font-size: 27px;
+  }
+
+  .brand-logo-image {
+    width: 26px;
+    height: 26px;
+  }
+
+  .brand-fallback {
+    width: 26px;
+    height: 26px;
+  }
+}

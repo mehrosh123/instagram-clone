@@ -7,7 +7,7 @@ import '../styles/Sidebar.css'
  * Usually receives props to update parent component state.
  */
 
-export default function Sidebar({ currentPage, currentUser }) {
+export default function Sidebar({ currentPage, currentUser, onNavigate }) {
   const menuItems = [
     { id: 'home', label: 'Home', icon: '🏠' },
     { id: 'explore', label: 'Explore', icon: '🔍' },
@@ -32,6 +32,10 @@ export default function Sidebar({ currentPage, currentUser }) {
                 <a 
                   href={`#${item.id}`} 
                   className={`nav-link ${currentPage === item.id ? 'active' : ''}`}
+                  onClick={(e) => {
+                    e.preventDefault()
+                    onNavigate(item.id)
+                  }}
                 >
                   <span className="icon">
                     {item.profilePicture ? (
@@ -50,7 +54,7 @@ export default function Sidebar({ currentPage, currentUser }) {
         </nav>
 
         {/* Create Post Button */}
-        <button className="create-btn">
+        <button className="create-btn" onClick={() => onNavigate('home')}>
           <span>➕</span>
           Create
         </button>

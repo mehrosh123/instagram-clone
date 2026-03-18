@@ -1,5 +1,6 @@
 import { useState } from 'react'
 import { useAuth } from '../context/AuthContext'
+import BrandLogo from './BrandLogo'
 import '../styles/Auth.css'
 
 /**
@@ -141,7 +142,7 @@ export default function Signup({ onSwitch }) {
     <div className="auth-container">
       <div className="auth-card">
         <div className="auth-header">
-          <h1>📷 InstaClone</h1>
+          <BrandLogo imageOnly />
           <p>Create your account</p>
         </div>
 

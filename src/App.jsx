@@ -99,7 +99,7 @@ function App() {
 
       <div className="app-body">
         {/* Sidebar - left navigation */}
-        <Sidebar currentPage={currentPage} currentUser={currentUser} />
+        <Sidebar currentPage={currentPage} currentUser={currentUser} onNavigate={handleNavigation} />
 
         {/* Main Content Area - changes based on currentPage state */}
         <main className="main-content">

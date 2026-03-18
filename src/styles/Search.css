@@ -28,12 +28,20 @@
   border-color: var(--primary-color);
 }
 
-.search-icon {
+.search-icon-btn {
   position: absolute;
   left: 10px;
+  background: transparent;
+  border: none;
+  padding: 2px;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+}
+
+.search-icon-glyph {
   font-size: 14px;
   color: #999;
-  pointer-events: none;
 }
 
 /* Search Dropdown */

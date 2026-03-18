@@ -22,8 +22,11 @@ export default function Feed() {
   const [posts, setPosts] = useState([])
   const [isLoading, setIsLoading] = useState(true)
   const [feedError, setFeedError] = useState('')
+  const [isCreateModalOpen, setIsCreateModalOpen] = useState(false)
   const [caption, setCaption] = useState('')
   const [imagesInput, setImagesInput] = useState('')
+  const [selectedFiles, setSelectedFiles] = useState([])
+  const [uploadingFiles, setUploadingFiles] = useState(false)
   const [posting, setPosting] = useState(false)
 
   const mapPost = useCallback((post) => {
@@ -189,44 +192,94 @@ export default function Feed() {
     }
   }
 
-  const parsedImages = useMemo(() => {
+  const parsedUrlImages = useMemo(() => {
     return imagesInput
       .split(',')
       .map(item => item.trim())
       .filter(Boolean)
   }, [imagesInput])
 
+  const mergedImageCount = useMemo(() => {
+    return parsedUrlImages.length + selectedFiles.length
+  }, [parsedUrlImages.length, selectedFiles.length])
+
+  const uploadToCloudinary = async (file) => {
+    const cloudName = import.meta.env.VITE_CLOUDINARY_CLOUD_NAME
+    const uploadPreset = import.meta.env.VITE_CLOUDINARY_UPLOAD_PRESET
+
+    if (!cloudName || !uploadPreset) {
+      throw new Error('Missing Cloudinary config: VITE_CLOUDINARY_CLOUD_NAME and VITE_CLOUDINARY_UPLOAD_PRESET')
+    }
+
+    const form = new FormData()
+    form.append('file', file)
+    form.append('upload_preset', uploadPreset)
+
+    const response = await fetch(`https://api.cloudinary.com/v1_1/${cloudName}/image/upload`, {
+      method: 'POST',
+      body: form
+    })
+
+    if (!response.ok) {
+      throw new Error('Cloudinary upload failed')
+    }
+
+    const payload = await response.json()
+    if (!payload.secure_url) {
+      throw new Error('Cloudinary did not return secure_url')
+    }
+
+    return payload.secure_url
+  }
+
+  const handleFileUpload = async (e) => {
+    const files = Array.from(e.target.files || [])
+    if (files.length === 0) return
+
+    setSelectedFiles(prev => [...prev, ...files].slice(0, 10))
+  }
+
   const handleCreatePost = async (e) => {
     e.preventDefault()
     setFeedError('')
 
-    if (parsedImages.length === 0) {
-      setFeedError('Provide at least one image URL')
+    if (mergedImageCount === 0) {
+      setFeedError('Provide at least one image URL or upload image file')
       return
     }
 
-    if (parsedImages.length > 10) {
+    if (mergedImageCount > 10) {
       setFeedError('Maximum 10 images allowed')
       return
     }
 
     setPosting(true)
+    setUploadingFiles(selectedFiles.length > 0)
     try {
+      const uploadedUrls = selectedFiles.length > 0
+        ? await Promise.all(selectedFiles.map(uploadToCloudinary))
+        : []
+
+      const finalImages = [...parsedUrlImages, ...uploadedUrls]
+
       await apiFetch('/api/posts', {
         method: 'POST',
         body: JSON.stringify({
           caption,
-          images: parsedImages
+          images: finalImages
         })
       })
 
       setCaption('')
       setImagesInput('')
+      setSelectedFiles([])
+      setIsCreateModalOpen(false)
       await loadFeed()
     } catch (err) {
       setFeedError(err.message)
     } finally {
       setPosting(false)
+      setUploadingFiles(false)
     }
   }
 
@@ -267,24 +320,58 @@ export default function Feed() {
 
         <Stories />
 
-        <form className="create-post-form" onSubmit={handleCreatePost}>
-          <h3>Create Post</h3>
-          <textarea
-            value={caption}
-            onChange={(e) => setCaption(e.target.value)}
-            placeholder="Write a caption"
-            rows={3}
-          />
-          <input
-            type="text"
-            value={imagesInput}
-            onChange={(e) => setImagesInput(e.target.value)}
-            placeholder="Image URLs (comma-separated, max 10)"
-          />
-          <button type="submit" disabled={posting}>
-            {posting ? 'Posting...' : 'Post'}
-          </button>
-        </form>
+        <button className="open-create-modal-btn" onClick={() => setIsCreateModalOpen(true)}>
+          Create Post
+        </button>
+
+        {isCreateModalOpen && (
+          <div className="create-post-modal-overlay" onClick={() => setIsCreateModalOpen(false)}>
+            <div className="create-post-modal" onClick={(e) => e.stopPropagation()}>
+              <div className="create-post-modal-header">
+                <h3>Create Post</h3>
+                <button onClick={() => setIsCreateModalOpen(false)}>✕</button>
+              </div>
+
+              <form className="create-post-form" onSubmit={handleCreatePost}>
+                <textarea
+                  value={caption}
+                  onChange={(e) => setCaption(e.target.value)}
+                  placeholder="Write a caption"
+                  rows={3}
+                />
+                <input
+                  type="text"
+                  value={imagesInput}
+                  onChange={(e) => setImagesInput(e.target.value)}
+                  placeholder="Image URLs (comma-separated)"
+                />
+
+                <label className="file-upload-label">
+                  Upload image files
+                  <input type="file" accept="image/*" multiple onChange={handleFileUpload} />
+                </label>
+
+                <small className="upload-hint">
+                  {uploadingFiles
+                    ? 'Uploading files to Cloudinary...'
+                    : `${mergedImageCount} / 10 images selected`}
+                </small>
+
+                {selectedFiles.length > 0 && (
+                  <small className="upload-hint">Files: {selectedFiles.map(file => file.name).join(', ')}</small>
+                )}
+
+                <button type="submit" disabled={posting || uploadingFiles}>
+                  {posting ? (
+                    <span className="posting-state">
+                      <span className="button-spinner" /> Posting...
+                    </span>
+                  ) : 'Post'}
+                </button>
+              </form>
+            </div>
+          </div>
+        )}
 
         {feedError && <p className="feed-error">{feedError}</p>}
 
