@@ -1,4 +1,6 @@
 import '../styles/Sidebar.css'
+import { useAuth } from '../context/AuthContext'
+import BrandLogo from './BrandLogo'
 
 /**
  * THEORY: Sidebar Component
@@ -8,12 +10,16 @@ import '../styles/Sidebar.css'
  */
 
 export default function Sidebar({ currentPage, currentUser, onNavigate }) {
+  const { logout } = useAuth()
+
   const menuItems = [
-    { id: 'home', label: 'Home', icon: '🏠' },
-    { id: 'explore', label: 'Explore', icon: '🔍' },
-    { id: 'reels', label: 'Reels', icon: '🎬' },
-    { id: 'messages', label: 'Messages', icon: '✉️' },
-    { id: 'likes', label: 'Likes', icon: '❤️' },
+    { id: 'home', label: 'Home', icon: '⌂' },
+    { id: 'reels', label: 'Reels', icon: '▻' },
+    { id: 'messages', label: 'Messages', icon: '✉' },
+    { id: 'search', label: 'Search', icon: '⌕' },
+    { id: 'explore', label: 'Explore', icon: '◌' },
+    { id: 'likes', label: 'Notifications', icon: '♡' },
+    { id: 'create', label: 'Create', icon: '+' },
     {
       id: 'profile',
       label: 'Profile',
@@ -24,6 +30,10 @@ export default function Sidebar({ currentPage, currentUser, onNavigate }) {
 
   return (
     <aside className="sidebar">
+      <div className="sidebar-brand" onClick={() => onNavigate('home')}>
+        <BrandLogo imageOnly compact />
+      </div>
+
       <div className="sidebar-sticky">
         <nav className="sidebar-nav">
           <ul>
@@ -52,18 +62,13 @@ export default function Sidebar({ currentPage, currentUser, onNavigate }) {
             ))}
           </ul>
         </nav>
-
-        {/* Create Post Button */}
-        <button className="create-btn" onClick={() => onNavigate('home')}>
-          <span>➕</span>
-          Create
-        </button>
       </div>
 
       {/* Footer */}
       <footer className="sidebar-footer">
-        <button className="footer-btn">⚙️</button>
-        <button className="footer-btn" title="More">⋯</button>
+        <button className="footer-btn" title="More">≡ <span>More</span></button>
+        <button className="footer-btn" title="Also from Meta">⌗ <span>Also from Meta</span></button>
+        <button className="footer-btn logout-btn" title="Log out" onClick={logout}>↩ <span>Log out</span></button>
       </footer>
     </aside>
   )

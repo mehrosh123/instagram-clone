@@ -3,25 +3,83 @@ import cors from 'cors'
 import fs from 'node:fs'
 import path from 'node:path'
 import { randomUUID } from 'node:crypto'
+import { fileURLToPath } from 'node:url'
 import bcrypt from 'bcryptjs'
 import jwt from 'jsonwebtoken'
 
 const app = express()
 const PORT = process.env.PORT || 4000
 const JWT_SECRET = process.env.JWT_SECRET || 'demo-secret-change-in-production'
-const DATA_FILE = path.join(process.cwd(), 'backend', 'data.json')
+const __filename = fileURLToPath(import.meta.url)
+const __dirname = path.dirname(__filename)
+const DATA_FILE = path.join(__dirname, 'data.json')
 
 app.use(cors({ origin: ['http://localhost:5173'], credentials: true }))
 app.use(express.json({ limit: '10mb' }))
 app.use(express.urlencoded({ extended: true, limit: '10mb' }))
 
 function readDb() {
+  if (!fs.existsSync(DATA_FILE)) {
+    const emptyDb = {
+      users: [],
+      posts: [],
+      comments: [],
+      likes: [],
+      follows: [],
+      stories: []
+    }
+    fs.writeFileSync(DATA_FILE, JSON.stringify(emptyDb, null, 2), 'utf8')
+  }
+
   const raw = fs.readFileSync(DATA_FILE, 'utf8')
-  return JSON.parse(raw)
+  const normalizedRaw = raw.charCodeAt(0) === 0xFEFF ? raw.slice(1) : raw
+
+  let db
+  try {
+    db = JSON.parse(normalizedRaw)
+  } catch (err) {
+    const fallbackDb = {
+      users: [],
+      posts: [],
+      comments: [],
+      likes: [],
+      follows: [],
+      stories: []
+    }
+
+    try {
+      const backupPath = path.join(__dirname, `data.corrupt.${Date.now()}.json`)
+      fs.writeFileSync(backupPath, normalizedRaw, 'utf8')
+      fs.writeFileSync(DATA_FILE, JSON.stringify(fallbackDb, null, 2), 'utf8')
+      console.error(`Recovered corrupted database file. Backup saved at ${backupPath}`)
+      db = fallbackDb
+    } catch (recoverErr) {
+      throw new Error(`Database file is invalid JSON at ${DATA_FILE}: ${err.message}. Recovery failed: ${recoverErr.message}`)
+    }
+  }
+
+  db.users = Array.isArray(db.users) ? db.users.filter(item => item && typeof item === 'object') : []
+  db.posts = Array.isArray(db.posts) ? db.posts.filter(item => item && typeof item === 'object') : []
+  db.comments = Array.isArray(db.comments) ? db.comments.filter(item => item && typeof item === 'object') : []
+  db.likes = Array.isArray(db.likes) ? db.likes.filter(item => item && typeof item === 'object') : []
+  db.follows = Array.isArray(db.follows) ? db.follows.filter(item => item && typeof item === 'object') : []
+  db.stories = Array.isArray(db.stories) ? db.stories.filter(item => item && typeof item === 'object') : []
+
+  return db
 }
 
 function writeDb(db) {
+  syncPostCounters(db)
   fs.writeFileSync(DATA_FILE, JSON.stringify(db, null, 2), 'utf8')
+}
+
+function syncPostCounters(db) {
+  db.posts.forEach(post => {
+    const likesCount = db.likes.filter(like => like.postId === post.id).length
+    const commentsCount = db.comments.filter(comment => comment.postId === post.id && !comment.deletedAt).length
+    post.likesCount = likesCount
+    post.commentsCount = commentsCount
+  })
 }
 
 function safeUser(user) {
@@ -65,58 +123,63 @@ app.get('/api/health', (_req, res) => {
 })
 
 app.post('/api/auth/signup', async (req, res) => {
-  const {
-    email,
-    username,
-    password,
-    fullName,
-    profilePicture = '',
-    bio = '',
-    website = '',
-    isPrivate = false
-  } = req.body
+  try {
+    const {
+      email,
+      username,
+      password,
+      fullName,
+      profilePicture = '',
+      bio = '',
+      website = '',
+      isPrivate = false
+    } = req.body || {}
 
-  if (!email || !username || !password || !fullName) {
-    return res.status(400).json({ error: 'email, username, password, fullName are required' })
+    if (!email || !username || !password || !fullName) {
+      return res.status(400).json({ error: 'email, username, password, fullName are required' })
+    }
+
+    const db = readDb()
+    const normalizedEmail = String(email).trim().toLowerCase()
+    const normalizedUsername = String(username).trim().toLowerCase().replace(/^@/, '')
+
+    if (db.users.some(u => String(u?.email || '').toLowerCase() === normalizedEmail)) {
+      return res.status(409).json({ error: 'Email already exists' })
+    }
+    if (db.users.some(u => String(u?.username || '').toLowerCase() === normalizedUsername)) {
+      return res.status(409).json({ error: 'Username already exists' })
+    }
+
+    const passwordHash = await bcrypt.hash(String(password), 10)
+    const now = new Date().toISOString()
+
+    const user = {
+      id: randomUUID(),
+      email: normalizedEmail,
+      username: normalizedUsername,
+      passwordHash,
+      fullName: String(fullName).trim(),
+      bio: String(bio),
+      website: String(website),
+      profilePicture: String(profilePicture),
+      isPrivate: Boolean(isPrivate),
+      isVerified: false,
+      followerCount: 0,
+      followingCount: 0,
+      createdAt: now,
+      updatedAt: now,
+      deletedAt: null
+    }
+
+    db.users.push(user)
+    writeDb(db)
+
+    const token = issueToken(user.id)
+    return res.status(201).json({ token, user: safeUser(user) })
+  } catch (err) {
+    console.error('Signup error:', err)
+    return res.status(500).json({ error: err?.message || 'Signup failed due to server error' })
   }
-
-  const db = readDb()
-  const normalizedEmail = String(email).trim().toLowerCase()
-  const normalizedUsername = String(username).trim().toLowerCase().replace(/^@/, '')
-
-  if (db.users.some(u => u.email === normalizedEmail)) {
-    return res.status(409).json({ error: 'Email already exists' })
-  }
-  if (db.users.some(u => u.username === normalizedUsername)) {
-    return res.status(409).json({ error: 'Username already exists' })
-  }
-
-  const passwordHash = await bcrypt.hash(password, 10)
-  const now = new Date().toISOString()
-
-  const user = {
-    id: randomUUID(),
-    email: normalizedEmail,
-    username: normalizedUsername,
-    passwordHash,
-    fullName: String(fullName).trim(),
-    bio: String(bio),
-    website: String(website),
-    profilePicture: String(profilePicture),
-    isPrivate: Boolean(isPrivate),
-    isVerified: false,
-    followerCount: 0,
-    followingCount: 0,
-    createdAt: now,
-    updatedAt: now,
-    deletedAt: null
-  }
-
-  db.users.push(user)
-  writeDb(db)
-
-  const token = issueToken(user.id)
-  return res.status(201).json({ token, user: safeUser(user) })
 })
 
 app.post('/api/auth/login', async (req, res) => {
@@ -181,6 +244,7 @@ app.post('/api/posts', authRequired, (req, res) => {
 
 app.get('/api/posts/feed', authRequired, (req, res) => {
   const db = readDb()
+  syncPostCounters(db)
   const feed = db.posts
     .filter(post => !post.deletedAt)
     .filter(post => {
@@ -200,11 +264,14 @@ app.get('/api/posts/feed', authRequired, (req, res) => {
           }
         })
       const likedByMe = db.likes.some(like => like.postId === post.id && like.userId === req.userId)
+      const likesCount = db.likes.filter(like => like.postId === post.id).length
 
       return {
         ...post,
+        likesCount,
+        commentsCount: comments.length,
         author: owner ? safeUser(owner) : null,
-        comments,
+        comments: Array.isArray(comments) ? comments : [],
         likedByMe
       }
     })
@@ -329,7 +396,8 @@ app.post('/api/posts/:id/like', authRequired, (req, res) => {
 
   const existing = db.likes.find(l => l.userId === req.userId && l.postId === post.id)
   if (existing) {
-    return res.status(409).json({ error: 'Post already liked' })
+    syncPostCounters(db)
+    return res.status(200).json({ liked: true, likesCount: post.likesCount })
   }
 
   db.likes.push({
@@ -339,9 +407,8 @@ app.post('/api/posts/:id/like', authRequired, (req, res) => {
     commentId: null,
     createdAt: new Date().toISOString()
   })
-  post.likesCount += 1
   writeDb(db)
-  res.status(201).json({ liked: true, likesCount: post.likesCount })
+  res.status(201).json({ liked: true, likesCount: db.likes.filter(like => like.postId === post.id).length })
 })
 
 app.delete('/api/posts/:id/like', authRequired, (req, res) => {
@@ -350,12 +417,14 @@ app.delete('/api/posts/:id/like', authRequired, (req, res) => {
   if (!post) return res.status(404).json({ error: 'Post not found' })
 
   const index = db.likes.findIndex(l => l.userId === req.userId && l.postId === post.id)
-  if (index === -1) return res.status(404).json({ error: 'Like not found' })
+  if (index === -1) {
+    syncPostCounters(db)
+    return res.status(200).json({ liked: false, likesCount: post.likesCount })
+  }
 
   db.likes.splice(index, 1)
-  if (post.likesCount > 0) post.likesCount -= 1
   writeDb(db)
-  res.json({ liked: false, likesCount: post.likesCount })
+  res.json({ liked: false, likesCount: db.likes.filter(like => like.postId === post.id).length })
 })
 
 app.post('/api/stories', authRequired, (req, res) => {
@@ -614,6 +683,12 @@ app.put('/api/users/:id', authRequired, (req, res) => {
 
   writeDb(db)
   res.json(safeUser(user))
+})
+
+app.use((err, _req, res, _next) => {
+  console.error('Unhandled API error:', err)
+  if (res.headersSent) return
+  res.status(err?.status || 500).json({ error: err?.message || 'Internal server error' })
 })
 
 app.listen(PORT, () => {

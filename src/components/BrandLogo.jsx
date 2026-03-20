@@ -9,12 +9,12 @@ export default function BrandLogo({ compact = false, wordmarkOnly = false, image
   return (
     <div
       className={`brand-logo ${compact ? 'compact' : ''} ${wordmarkOnly ? 'wordmark-only' : ''}`}
-      aria-label="InstaClone"
+      aria-label="Instagram"
     >
       {!wordmarkOnly && logoSrc && !imageFailed && (
         <img
           src={logoSrc}
-          alt="InstaClone logo"
+          alt="Instagram logo"
           className="brand-logo-image"
           onError={() => setImageFailed(true)}
         />
@@ -22,7 +22,7 @@ export default function BrandLogo({ compact = false, wordmarkOnly = false, image
       {!wordmarkOnly && (imageFailed || !logoSrc) && (
         <span className="brand-fallback" aria-hidden="true">IG</span>
       )}
-      {!imageOnly && <span className="brand-wordmark">InstaClone</span>}
+      {!imageOnly && <span className="brand-wordmark">Instagram</span>}
     </div>
   )
 }
