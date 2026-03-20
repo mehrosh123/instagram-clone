@@ -32,8 +32,6 @@ import '../styles/Stories.css'
 export default function Stories() {
   const { currentUser } = useAuth()
   const [stories, setStories] = useState([])
-  const [storyUrl, setStoryUrl] = useState('')
-  const [storyCaption, setStoryCaption] = useState('')
   const [loading, setLoading] = useState(false)
   const [error, setError] = useState('')
 
@@ -132,16 +130,18 @@ export default function Stories() {
   }
 
   const handleAddStory = async (e) => {
-    e.preventDefault()
-    if (!storyUrl.trim()) return
+    if (e) e.preventDefault()
+
+    const imageUrl = window.prompt('Paste story image URL')
+    if (!imageUrl || !imageUrl.trim()) return
+
+    const caption = window.prompt('Add a caption (optional)') || ''
 
     try {
       await apiFetch('/api/stories', {
         method: 'POST',
-        body: JSON.stringify({ imageUrl: storyUrl.trim(), caption: storyCaption.trim() })
+        body: JSON.stringify({ imageUrl: imageUrl.trim(), caption: caption.trim() })
       })
-      setStoryUrl('')
-      setStoryCaption('')
       await loadStories()
     } catch (err) {
       setError(err.message)
@@ -150,27 +150,6 @@ export default function Stories() {
 
   return (
     <div className="stories-container">
-      <div className="stories-header">
-        <h3>Stories</h3>
-        <button className="close-btn" onClick={() => setSelectedStory(null)}>✕</button>
-      </div>
-
-      <form className="story-create-form" onSubmit={handleAddStory}>
-        <input
-          type="url"
-          value={storyUrl}
-          onChange={(e) => setStoryUrl(e.target.value)}
-          placeholder="Story image URL"
-        />
-        <input
-          type="text"
-          value={storyCaption}
-          onChange={(e) => setStoryCaption(e.target.value)}
-          placeholder="Story caption"
-        />
-        <button type="submit">Add Story</button>
-      </form>
-
       {error && <p className="story-error">{error}</p>}
       {loading && <p className="story-loading">Loading stories...</p>}
 
@@ -249,22 +228,24 @@ export default function Stories() {
       ) : (
         /* Stories List */
         <div className="stories-list">
+          <button className="story-add" onClick={handleAddStory}>
+            <span>+</span>
+            <small>Your story</small>
+          </button>
           {stories.map(story => (
             <div 
               key={story.id}
               className="story-card"
               onClick={() => setSelectedStory(story)}
             >
-              <img 
-                src={story.image} 
-                alt={story.author}
-                className={`story-thumbnail ${story.viewed ? 'viewed' : ''}`}
-              />
-              <div className="story-overlay">
-                <span className="badge">{story.avatar}</span>
-                <p className="story-name">{story.author}</p>
-                <p className="story-time">{timeRemaining[story.id]}</p>
+              <div className="story-ring">
+                <img 
+                  src={story.image} 
+                  alt={story.author}
+                  className={`story-thumbnail ${story.viewed ? 'viewed' : ''}`}
+                />
               </div>
+              <p className="story-name">{story.author}</p>
             </div>
           ))}
         </div>

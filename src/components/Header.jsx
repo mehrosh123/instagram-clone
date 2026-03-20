@@ -1,5 +1,6 @@
 import Search from './Search'
 import BrandLogo from './BrandLogo'
+import { useAuth } from '../context/AuthContext'
 import '../styles/Header.css'
 
 /**
@@ -13,6 +14,8 @@ import '../styles/Header.css'
  */
 
 export default function Header({ onNavigate, currentUser, onSearchSelectUser }) {
+  const { logout } = useAuth()
+
   /**
    * THEORY: Conditional Rendering
    * ==============================
@@ -66,6 +69,13 @@ export default function Header({ onNavigate, currentUser, onSearchSelectUser }) 
             title="Create"
           >
             ➕
+          </button>
+          <button
+            className="nav-btn"
+            title="Log out"
+            onClick={logout}
+          >
+            ↩
           </button>
           <button 
             className="nav-btn profile-btn"

@@ -1,9 +1,7 @@
 import { createContext, useContext, useState, useCallback } from 'react'
 
 const STORAGE_KEYS = {
-  users: 'demo_users',
-  token: 'auth_token',
-  authUserId: 'auth_user_id'
+  token: 'auth_token'
 }
 
 function getInitials(fullName = '', email = '') {
@@ -16,57 +14,15 @@ function getInitials(fullName = '', email = '') {
   return (email?.[0] || 'U').toUpperCase()
 }
 
-function createUserRecord({
-  email,
-  password,
-  username,
-  fullName,
-  profilePicture,
-  bio,
-  website,
-  isPrivate
-}) {
+function buildUserWithInitials(user) {
   return {
-    id: crypto.randomUUID(),
-    email,
-    username: username.startsWith('@') ? username.slice(1) : username,
-    password,
-    fullName,
-    bio: bio || '',
-    website: website || '',
-    profilePicture: profilePicture || '',
-    initials: getInitials(fullName, email),
-    isPrivate: !!isPrivate,
-    followerCount: 0,
-    followingCount: 0,
-    createdAt: new Date().toISOString(),
-    updatedAt: new Date().toISOString()
+    ...user,
+    initials: user.initials || getInitials(user.fullName || '', user.email || '')
   }
 }
 
-function toSafeUser(user) {
-  const { password, ...safeUser } = user
-  return safeUser
-}
-
-function getUsersFromStorage() {
-  try {
-    const raw = localStorage.getItem(STORAGE_KEYS.users)
-    if (!raw) return []
-    const parsed = JSON.parse(raw)
-    return Array.isArray(parsed) ? parsed : []
-  } catch {
-    return []
-  }
-}
-
-function saveUsersToStorage(users) {
-  localStorage.setItem(STORAGE_KEYS.users, JSON.stringify(users))
-}
-
-function storeAuthSession(token, userId) {
+function storeAuthSession(token) {
   localStorage.setItem(STORAGE_KEYS.token, token)
-  localStorage.setItem(STORAGE_KEYS.authUserId, userId)
 }
 
 /**
@@ -143,68 +99,42 @@ export function AuthProvider({ children }) {
     setIsLoading(true)
     setError(null)
     try {
-      try {
-        const response = await fetch('/api/auth/signup', {
-          method: 'POST',
-          headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify({
-            email,
-            password,
-            username,
-            fullName,
-            profilePicture,
-            bio: profileMeta.bio || '',
-            website: profileMeta.website || '',
-            isPrivate: !!profileMeta.isPrivate
-          })
-        })
-
-        if (!response.ok) {
-          throw new Error('Signup failed')
-        }
-
-        const data = await response.json()
-        storeAuthSession(data.token, data.user.id)
-        setCurrentUser(data.user)
-        return data.user
-      } catch {
-        const users = getUsersFromStorage()
-        const normalizedEmail = email.trim().toLowerCase()
-        const normalizedUsername = username.trim().toLowerCase()
-
-        const emailExists = users.some(user => user.email.toLowerCase() === normalizedEmail)
-        if (emailExists) {
-          throw new Error('An account with this email already exists')
-        }
-
-        const usernameExists = users.some(user => user.username.toLowerCase() === normalizedUsername)
-        if (usernameExists) {
-          throw new Error('This username is already taken')
-        }
-
-        const newUser = createUserRecord({
-          email: normalizedEmail,
+      const response = await fetch('/api/auth/signup', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          email,
           password,
-          username: normalizedUsername,
-          fullName: fullName.trim(),
-          profilePicture: profilePicture.trim(),
-          bio: profileMeta.bio?.trim() || '',
-          website: profileMeta.website?.trim() || '',
+          username,
+          fullName,
+          profilePicture,
+          bio: profileMeta.bio || '',
+          website: profileMeta.website || '',
           isPrivate: !!profileMeta.isPrivate
         })
+      })
 
-        const updatedUsers = [...users, newUser]
-        saveUsersToStorage(updatedUsers)
-
-        const token = `demo-token-${newUser.id}`
-        storeAuthSession(token, newUser.id)
-
-        const safeUser = toSafeUser(newUser)
-        setCurrentUser(safeUser)
-        return safeUser
+      if (!response.ok) {
+        let message = 'Signup failed'
+        try {
+          const payload = await response.json()
+          message = payload.error || message
+        } catch {
+          // Keep default message when response body is not JSON.
+        }
+        throw new Error(message)
       }
+
+      const data = await response.json()
+      storeAuthSession(data.token)
+      const user = buildUserWithInitials(data.user)
+      setCurrentUser(user)
+      return user
     } catch (err) {
-      setError(err.message)
+      const message = err?.message === 'Failed to fetch'
+        ? 'Unable to connect to backend. Start backend server and try again.'
+        : (err.message || 'Unable to connect to backend. Start backend server and try again.')
+      setError(message)
       throw err
     } finally {
       setIsLoading(false)
@@ -215,39 +145,33 @@ export function AuthProvider({ children }) {
     setIsLoading(true)
     setError(null)
     try {
-      try {
-        const response = await fetch('/api/auth/login', {
-          method: 'POST',
-          headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify({ email, password })
-        })
+      const response = await fetch('/api/auth/login', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ email, password })
+      })
 
-        if (!response.ok) {
-          throw new Error('Login failed')
+      if (!response.ok) {
+        let message = 'Invalid email or password'
+        try {
+          const payload = await response.json()
+          message = payload.error || message
+        } catch {
+          // Keep default message when response body is not JSON.
         }
-
-        const data = await response.json()
-        storeAuthSession(data.token, data.user.id)
-        setCurrentUser(data.user)
-        return data.user
-      } catch {
-        const users = getUsersFromStorage()
-        const normalizedEmail = email.trim().toLowerCase()
-        const user = users.find(u => u.email.toLowerCase() === normalizedEmail)
-
-        if (!user || user.password !== password) {
-          throw new Error('Invalid email or password')
-        }
-
-        const token = `demo-token-${user.id}`
-        storeAuthSession(token, user.id)
-
-        const safeUser = toSafeUser(user)
-        setCurrentUser(safeUser)
-        return safeUser
+        throw new Error(message)
       }
+
+      const data = await response.json()
+      storeAuthSession(data.token)
+      const user = buildUserWithInitials(data.user)
+      setCurrentUser(user)
+      return user
     } catch (err) {
-      setError(err.message)
+      const message = err?.message === 'Failed to fetch'
+        ? 'Unable to connect to backend. Start backend server and try again.'
+        : (err.message || 'Unable to connect to backend. Start backend server and try again.')
+      setError(message)
       throw err
     } finally {
       setIsLoading(false)
@@ -256,7 +180,6 @@ export function AuthProvider({ children }) {
 
   const logout = useCallback(() => {
     localStorage.removeItem(STORAGE_KEYS.token)
-    localStorage.removeItem(STORAGE_KEYS.authUserId)
     setCurrentUser(null)
   }, [])
 
@@ -270,36 +193,20 @@ export function AuthProvider({ children }) {
     if (!token) return
 
     try {
-      try {
-        const response = await fetch('/api/auth/me', {
-          headers: { 'Authorization': `Bearer ${token}` }
-        })
+      const response = await fetch('/api/auth/me', {
+        headers: { 'Authorization': `Bearer ${token}` }
+      })
 
-        if (response.ok) {
-          const user = await response.json()
-          setCurrentUser(user)
-          return
-        }
-      } catch {
-        // Ignore API errors and fallback to local demo storage.
-      }
-
-      const authUserId = localStorage.getItem(STORAGE_KEYS.authUserId)
-      if (!authUserId) {
-        logout()
+      if (response.ok) {
+        const user = await response.json()
+        setCurrentUser(buildUserWithInitials(user))
         return
       }
 
-      const users = getUsersFromStorage()
-      const user = users.find(item => item.id === authUserId)
-      if (!user) {
-        logout()
-        return
-      }
-
-      setCurrentUser(toSafeUser(user))
+      logout()
     } catch (err) {
       console.error('Auth check failed:', err)
+      logout()
     }
   }, [logout])
 

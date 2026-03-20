@@ -8,18 +8,41 @@
 
 .sidebar {
   height: 100vh;
+  position: sticky;
+  top: 0;
   display: flex;
   flex-direction: column;
-  background: white;
+  align-items: stretch;
+  background: #f1f1f1;
   border-right: 1px solid var(--border-color);
-  padding: 10px 0;
+  padding: 16px 10px 14px;
   overflow-y: auto;
+}
+
+.sidebar-brand {
+  width: 100%;
+  height: 54px;
+  border-radius: 12px;
+  display: flex;
+  align-items: center;
+  justify-content: flex-start;
+  padding-left: 10px;
+  margin-bottom: 10px;
+  cursor: pointer;
+}
+
+.sidebar-brand .brand-logo-image,
+.sidebar-brand .brand-fallback {
+  width: 32px;
+  height: 32px;
+  border-radius: 8px;
 }
 
 .sidebar-sticky {
   flex: 1;
   display: flex;
   flex-direction: column;
+  width: 100%;
 }
 
 /* Navigation Menu */
@@ -34,15 +57,16 @@
 .nav-link {
   display: flex;
   align-items: center;
-  gap: 16px;
-  padding: 12px 16px;
+  gap: 14px;
+  justify-content: flex-start;
+  padding: 11px 12px;
   color: var(--text-color);
   text-decoration: none;
-  font-size: 14px;
+  font-size: 23px;
   font-weight: 500;
   transition: all 0.2s;
-  border-radius: 8px;
-  margin: 4px 8px;
+  border-radius: 12px;
+  margin: 3px 0;
 }
 
 .nav-link:hover {
@@ -51,26 +75,26 @@
 }
 
 .nav-link.active {
-  color: var(--primary-color);
+  color: #151515;
   font-weight: 600;
-  background-color: var(--light-bg);
-  border-left: 3px solid var(--primary-color);
-  padding-left: 13px;
+  background-color: transparent;
+  border: none;
 }
 
 .nav-link.active .icon {
-  transform: scale(1.12);
+  transform: scale(1.08);
   font-weight: 700;
 }
 
 .nav-link .icon {
-  font-size: 20px;
-  min-width: 20px;
+  font-size: 30px;
+  min-width: 30px;
+  text-align: center;
 }
 
 .sidebar-profile-image {
-  width: 22px;
-  height: 22px;
+  width: 28px;
+  height: 28px;
   border-radius: 50%;
   object-fit: cover;
   border: 1px solid var(--border-color);
@@ -78,61 +102,53 @@
 }
 
 .nav-link .label {
-  white-space: nowrap;
-  overflow: hidden;
-  text-overflow: ellipsis;
-}
-
-/* Create Button */
-.create-btn {
-  width: calc(100% - 16px);
-  margin: 20px 8px;
-  padding: 12px;
-  background: var(--primary-color);
-  color: white;
-  border-radius: 8px;
-  font-weight: 600;
-  font-size: 15px;
-  display: flex;
-  align-items: center;
-  justify-content: center;
-  gap: 8px;
-  cursor: pointer;
-  transition: background-color 0.2s;
-}
-
-.create-btn:hover {
-  background: #0080d0;
-}
-
-.create-btn span {
-  font-size: 18px;
+  display: inline;
+  font-size: 26px;
+  line-height: 1;
 }
 
 /* Sidebar Footer */
 .sidebar-footer {
   display: flex;
-  gap: 8px;
-  padding: 0 8px 20px;
-  border-top: 1px solid var(--border-color);
-  margin-top: 20px;
-  padding-top: 20px;
+  flex-direction: column;
+  gap: 6px;
+  padding: 14px 0 4px;
+  border-top: none;
+  width: 100%;
+  align-items: stretch;
 }
 
 .footer-btn {
-  flex: 1;
-  padding: 12px;
-  background: white;
-  border: 1px solid var(--border-color);
-  border-radius: 8px;
+  width: 100%;
+  min-height: 40px;
+  padding: 10px 12px;
+  background: transparent;
+  border: none;
+  border-radius: 12px;
   cursor: pointer;
-  font-size: 18px;
+  font-size: 24px;
   transition: all 0.2s;
+  display: flex;
+  align-items: center;
+  gap: 12px;
 }
 
 .footer-btn:hover {
   background: var(--hover-bg);
-  border-color: var(--primary-color);
+}
+
+.footer-btn span {
+  font-size: 24px;
+}
+
+.logout-btn {
+  color: #d92d20;
+  font-size: 24px;
+  font-weight: 600;
+}
+
+.logout-btn:hover {
+  color: #b12218;
 }
 
 /* Responsive */
@@ -144,11 +160,17 @@
     bottom: 0;
     top: auto;
     z-index: 120;
-    height: 64px;
+    height: 68px;
     border-right: none;
     border-top: 1px solid var(--border-color);
-    padding: 0;
+    padding: 0 8px;
     overflow: hidden;
+    background: #fff;
+  }
+
+  .sidebar-brand,
+  .sidebar-footer {
+    display: none;
   }
 
   .sidebar-sticky {
@@ -163,7 +185,7 @@
     display: flex;
     justify-content: space-around;
     align-items: center;
-    height: 64px;
+    height: 68px;
   }
 
   .sidebar-nav li {
@@ -172,27 +194,18 @@
 
   .nav-link {
     justify-content: center;
-    flex-direction: column;
+    flex-direction: row;
     gap: 2px;
     margin: 0;
-    padding: 8px 4px;
-    border-radius: 0;
+    padding: 8px;
+    border-radius: 10px;
   }
 
   .nav-link.active {
-    border-left: none;
-    border-top: 3px solid var(--primary-color);
-    padding-left: 4px;
-    background: white;
+    border: 1px solid var(--border-color);
   }
 
   .nav-link .label {
-    display: block;
-    font-size: 10px;
-  }
-
-  .create-btn,
-  .sidebar-footer {
     display: none;
   }
 }

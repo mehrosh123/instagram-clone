@@ -9,22 +9,14 @@
 .feed {
   display: flex;
   flex-direction: column;
-  gap: 20px;
-  padding: 20px 0;
+  gap: 14px;
+  padding: 0;
 }
 
 .feed-container {
   display: flex;
   flex-direction: column;
-  gap: 20px;
-}
-
-.feed-title {
-  font-size: 24px;
-  font-weight: 700;
-  margin-bottom: 10px;
-  padding: 0 0 10px;
-  border-bottom: 1px solid var(--border-color);
+  gap: 16px;
 }
 
 .create-post-form {
@@ -58,11 +50,13 @@
 
 .open-create-modal-btn {
   width: fit-content;
-  background: var(--primary-color);
-  color: #fff;
-  padding: 10px 16px;
-  border-radius: 8px;
+  background: #fff;
+  color: #242424;
+  border: 1px solid var(--border-color);
+  padding: 8px 12px;
+  border-radius: 999px;
   font-weight: 600;
+  font-size: 13px;
 }
 
 .create-post-modal-overlay {
@@ -78,7 +72,7 @@
 .create-post-modal {
   width: min(560px, 92vw);
   background: #fff;
-  border-radius: 12px;
+  border-radius: 14px;
   box-shadow: var(--shadow-lg);
   border: 1px solid var(--border-color);
 }

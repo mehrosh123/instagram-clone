@@ -20,6 +20,7 @@ import '../styles/Feed.css'
 export default function Feed() {
   const { currentUser } = useAuth()
   const [posts, setPosts] = useState([])
+  const [pendingLikePostIds, setPendingLikePostIds] = useState([])
   const [isLoading, setIsLoading] = useState(true)
   const [feedError, setFeedError] = useState('')
   const [isCreateModalOpen, setIsCreateModalOpen] = useState(false)
@@ -50,10 +51,10 @@ export default function Feed() {
         : 'https://images.unsplash.com/photo-1503899036084-c55cdd92da26?w=1000&auto=format&fit=crop',
       images: post.images || [],
       caption: post.caption || '',
-      likes: post.likesCount || 0,
+      likes: Number.isFinite(post.likesCount) ? post.likesCount : 0,
       liked: !!post.likedByMe,
       comments,
-      timestamp: new Date(post.createdAt).toLocaleString()
+      timestamp: post.createdAt ? new Date(post.createdAt).toLocaleString() : 'Just now'
     }
   }, [])
 
@@ -86,16 +87,9 @@ export default function Feed() {
   const handleLike = async (postId) => {
     const target = posts.find(post => post.id === postId)
     if (!target) return
+    if (pendingLikePostIds.includes(postId)) return
 
-    setPosts(prev => prev.map(post =>
-      post.id === postId
-        ? {
-            ...post,
-            liked: !post.liked,
-            likes: post.liked ? post.likes - 1 : post.likes + 1
-          }
-        : post
-    ))
+    setPendingLikePostIds(prev => [...prev, postId])
 
     try {
       if (target.liked) {
@@ -109,16 +103,11 @@ export default function Feed() {
           post.id === postId ? { ...post, liked: true, likes: data.likesCount } : post
         ))
       }
-    } catch {
-      setPosts(prev => prev.map(post =>
-        post.id === postId
-          ? {
-              ...post,
-              liked: target.liked,
-              likes: target.likes
-            }
-          : post
-      ))
+    } catch (err) {
+      setFeedError(err.message || 'Failed to update like')
+      await loadFeed()
+    } finally {
+      setPendingLikePostIds(prev => prev.filter(id => id !== postId))
     }
   }
 
@@ -136,13 +125,22 @@ export default function Feed() {
               ...post,
               comments: [
                 ...post.comments,
-                { id: created.id, userId: currentUser?.id, user: comment.user, text: created.text }
+                {
+                  id: created.id,
+                  userId: currentUser?.id,
+                  user: currentUser?.username || comment.user,
+                  text: created.text
+                }
               ]
             }
           : post
       ))
+
+      await loadFeed()
+      return true
     } catch (err) {
       setFeedError(err.message)
+      return false
     }
   }
 
@@ -316,12 +314,10 @@ export default function Feed() {
   return (
     <div className="feed">
       <div className="feed-container">
-        <h2 className="feed-title">Your Feed</h2>
-
         <Stories />
 
         <button className="open-create-modal-btn" onClick={() => setIsCreateModalOpen(true)}>
-          Create Post
+          + Create
         </button>
 
         {isCreateModalOpen && (
@@ -398,6 +394,7 @@ export default function Feed() {
             onComment={handleComment}
             onEdit={handleEditPost}
             onDelete={handleDeletePost}
+            isLikePending={pendingLikePostIds.includes(post.id)}
             canManage={currentUser?.id && post.authorId === currentUser.id}
             currentUserId={currentUser?.id}
             onEditComment={handleEditComment}

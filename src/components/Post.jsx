@@ -20,12 +20,14 @@ export default function Post({
   onEdit,
   onDelete,
   canManage = false,
+  isLikePending = false,
   currentUserId,
   onEditComment,
   onDeleteComment
 }) {
   const [commentText, setCommentText] = useState('')
   const [showComments, setShowComments] = useState(false)
+  const [isPostingComment, setIsPostingComment] = useState(false)
 
   /**
    * THEORY: Controlled Components
@@ -38,14 +40,21 @@ export default function Post({
     setCommentText(e.target.value)
   }
 
-  const handlePostComment = () => {
-    if (commentText.trim()) {
-      onComment(post.id, {
-        user: 'You',
-        text: commentText
-      })
+  const handlePostComment = async () => {
+    if (!commentText.trim() || isPostingComment) return
+
+    setIsPostingComment(true)
+    const submitted = await onComment(post.id, {
+      user: 'You',
+      text: commentText
+    })
+
+    if (submitted) {
       setCommentText('')
+      setShowComments(true)
     }
+
+    setIsPostingComment(false)
   }
 
   return (
@@ -85,6 +94,7 @@ export default function Post({
           className={`like-btn ${post.liked ? 'liked' : ''}`}
           onClick={() => onLike(post.id)}
           title={post.liked ? 'Unlike' : 'Like'}
+          disabled={isLikePending}
         >
           {post.liked ? '❤️' : '🤍'}
         </button>
@@ -139,17 +149,18 @@ export default function Post({
           placeholder="Add a comment..."
           value={commentText}
           onChange={handleCommentChange}
-          onKeyPress={(e) => {
+          onKeyDown={(e) => {
             if (e.key === 'Enter') {
+              e.preventDefault()
               handlePostComment()
             }
           }}
         />
         <button 
           onClick={handlePostComment}
-          disabled={!commentText.trim()}
+          disabled={!commentText.trim() || isPostingComment}
         >
-          Post
+          {isPostingComment ? 'Posting...' : 'Post'}
         </button>
       </div>
 

@@ -1,10 +1,8 @@
 import { useEffect, useState } from 'react'
-import Header from './components/Header'
 import Feed from './components/Feed'
 import Profile from './components/Profile'
 import Sidebar from './components/Sidebar'
-import Login from './components/Login'
-import Signup from './components/Signup'
+import AuthLanding from './components/AuthLanding'
 import SplashScreen from './components/SplashScreen'
 import FollowButton from './components/Followers'
 import { useAuth } from './context/AuthContext'
@@ -45,24 +43,19 @@ function App() {
   const { isAuthenticated, checkAuth, currentUser } = useAuth()
   // Navigation state - tracks which page is currently shown
   const [currentPage, setCurrentPage] = useState('home')
-  const [authPage, setAuthPage] = useState('signup')
   const [selectedUsername, setSelectedUsername] = useState('')
   const [selectedUserData, setSelectedUserData] = useState(null)
-  const [isSplashDone, setIsSplashDone] = useState(false)
+  const [hasStoredToken, setHasStoredToken] = useState(() => !!localStorage.getItem('auth_token'))
   const [isAuthChecked, setIsAuthChecked] = useState(false)
 
   useEffect(() => {
     let isMounted = true
 
-    const timerId = setTimeout(() => {
-      if (isMounted) {
-        setIsSplashDone(true)
-      }
-    }, 1400)
-
     const initializeAuth = async () => {
       try {
-        await checkAuth()
+        if (hasStoredToken) {
+          await checkAuth()
+        }
       } finally {
         if (isMounted) {
           setIsAuthChecked(true)
@@ -74,15 +67,14 @@ function App() {
 
     return () => {
       isMounted = false
-      clearTimeout(timerId)
     }
-  }, [checkAuth])
+  }, [checkAuth, hasStoredToken])
 
   useEffect(() => {
-    if (!isAuthenticated && authPage !== 'login' && authPage !== 'signup') {
-      setAuthPage('signup')
+    if (!isAuthenticated) {
+      setHasStoredToken(!!localStorage.getItem('auth_token'))
     }
-  }, [authPage, isAuthenticated])
+  }, [isAuthenticated])
 
   /**
    * THEORY: Event Handler (Callback)
@@ -95,38 +87,16 @@ function App() {
     setCurrentPage(page)
   }
 
-  const handleSearchSelectUser = async (user) => {
-    try {
-      const data = await apiFetch(`/api/users/${user.username}`)
-      setSelectedUsername(user.username)
-      setSelectedUserData(data)
-      setCurrentPage('user-profile')
-    } catch (err) {
-      console.error('Failed to load user profile:', err)
-    }
-  }
-
-  if (!isSplashDone || !isAuthChecked) {
+  if (hasStoredToken && !isAuthChecked) {
     return <SplashScreen />
   }
 
   if (!isAuthenticated) {
-    return authPage === 'signup' ? (
-      <Signup onSwitch={() => setAuthPage('login')} />
-    ) : (
-      <Login onSwitch={() => setAuthPage('signup')} />
-    )
+    return <AuthLanding />
   }
 
   return (
     <div className="app">
-      {/* Header - shown on all pages */}
-      <Header
-        onNavigate={handleNavigation}
-        currentUser={currentUser}
-        onSearchSelectUser={handleSearchSelectUser}
-      />
-
       <div className="app-body">
         {/* Sidebar - left navigation */}
         <Sidebar currentPage={currentPage} currentUser={currentUser} onNavigate={handleNavigation} />
@@ -134,25 +104,31 @@ function App() {
         {/* Main Content Area - changes based on currentPage state */}
         <main className="main-content">
           {currentPage === 'home' ? (
-            <>
-              {/* 
-                THEORY: Conditional Rendering
-                ==============================
-                Renders Feed when currentPage is 'home'
-                React only renders the active view, saving performance
-              */}
-              <Feed />
-              <aside className="sidebar-right">
-                <SuggestedUsers currentUser={currentUser} />
-              </aside>
-            </>
+            /* 
+              THEORY: Conditional Rendering
+              ==============================
+              Renders Feed when currentPage is 'home'
+              React only renders the active view, saving performance
+            */
+            <Feed />
           ) : currentPage === 'profile' ? (
             <Profile />
           ) : currentPage === 'user-profile' && selectedUserData ? (
             <UserProfileView username={selectedUsername} data={selectedUserData} />
           ) : null}
         </main>
+
+        {currentPage === 'home' && (
+          <aside className="sidebar-right">
+            <SuggestedUsers currentUser={currentUser} />
+          </aside>
+        )}
       </div>
+
+      <footer className="app-footer">
+        <p>About · Help · Press · API · Jobs · Privacy · Terms · Locations</p>
+        <p>Instagram from Meta</p>
+      </footer>
     </div>
   )
 }
@@ -182,7 +158,23 @@ function SuggestedUsers({ currentUser }) {
 
   return (
     <div className="suggested-users">
-      <h3>Suggested for you</h3>
+      <div className="account-preview">
+        {currentUser?.profilePicture ? (
+          <img src={currentUser.profilePicture} alt={currentUser.username} className="avatar" />
+        ) : (
+          <span className="avatar">👤</span>
+        )}
+        <div className="user-details">
+          <p className="name">@{currentUser?.username || 'you'}</p>
+          <small>{currentUser?.fullName || 'Welcome back'}</small>
+        </div>
+      </div>
+
+      <div className="suggested-header">
+        <h3>Suggested for you</h3>
+        <button type="button">See all</button>
+      </div>
+
       {users.map(user => (
         <div key={user.id} className="suggested-user">
           <div className="user-info">
@@ -199,6 +191,7 @@ function SuggestedUsers({ currentUser }) {
           <FollowButton userId={user.id} isPrivate={user.isPrivate} />
         </div>
       ))}
+
     </div>
   )
 }

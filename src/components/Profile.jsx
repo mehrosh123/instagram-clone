@@ -1,4 +1,4 @@
-import { useState } from 'react'
+import { useMemo, useState } from 'react'
 import { useAuth } from '../context/AuthContext'
 import '../styles/Profile.css'
 
@@ -14,7 +14,68 @@ import '../styles/Profile.css'
 
 export default function Profile() {
   const { currentUser } = useAuth()
-  const [profile] = useState({
+  const userPosts = useMemo(() => {
+    const demoPosts = [
+      {
+        id: 1,
+        image: 'https://picsum.photos/id/1015/700/700',
+        likes: 1264,
+        comments: 32
+      },
+      {
+        id: 2,
+        image: 'https://picsum.photos/id/1025/700/700',
+        likes: 983,
+        comments: 21
+      },
+      {
+        id: 3,
+        image: 'https://picsum.photos/id/1035/700/700',
+        likes: 1742,
+        comments: 49
+      },
+      {
+        id: 4,
+        image: 'https://picsum.photos/id/1043/700/700',
+        likes: 1110,
+        comments: 18
+      },
+      {
+        id: 5,
+        image: 'https://picsum.photos/id/1050/700/700',
+        likes: 2051,
+        comments: 57
+      },
+      {
+        id: 6,
+        image: 'https://picsum.photos/id/1062/700/700',
+        likes: 894,
+        comments: 16
+      },
+      {
+        id: 7,
+        image: 'https://picsum.photos/id/1074/700/700',
+        likes: 1433,
+        comments: 40
+      },
+      {
+        id: 8,
+        image: 'https://picsum.photos/id/1084/700/700',
+        likes: 732,
+        comments: 12
+      },
+      {
+        id: 9,
+        image: 'https://picsum.photos/id/1080/700/700',
+        likes: 1678,
+        comments: 44
+      }
+    ]
+
+    return demoPosts
+  }, [])
+
+  const profile = {
     avatar: currentUser?.profilePicture || '',
     initials: currentUser?.initials || 'SC',
     name: currentUser?.fullName || 'Sarah Chen',
@@ -22,43 +83,16 @@ export default function Profile() {
     bio: currentUser?.bio || 'Photographer | Traveler | Coffee enthusiast',
     followers: currentUser?.followerCount ?? 15234,
     following: currentUser?.followingCount ?? 892,
-    postsCount: 256,
+    postsCount: userPosts.length,
     website: currentUser?.website || 'sarahchen.com',
     isFollowing: false
-  })
+  }
 
   const websiteHref = profile.website
     ? (profile.website.startsWith('http://') || profile.website.startsWith('https://')
       ? profile.website
       : `https://${profile.website}`)
     : ''
-
-  const [userPosts] = useState([
-    {
-      id: 1,
-      image: 'https://images.unsplash.com/photo-1682288946918-3ffcc7c03a05?w=200',
-      likes: 2345,
-      comments: 125
-    },
-    {
-      id: 2,
-      image: 'https://images.unsplash.com/photo-1506157786151-b8491531f063?w=200',
-      likes: 1890,
-      comments: 98
-    },
-    {
-      id: 3,
-      image: 'https://images.unsplash.com/photo-1502672260266-1c1ef2d93688?w=200',
-      likes: 3456,
-      comments: 201
-    },
-    {
-      id: 4,
-      image: 'https://images.unsplash.com/photo-1469022563149-aa64dbd37dae?w=200',
-      likes: 2100,
-      comments: 156
-    }
-  ])
 
   const [isFollowing, setIsFollowing] = useState(profile.isFollowing)
 
