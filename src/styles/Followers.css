@@ -136,6 +136,8 @@
   font-weight: 600;
   color: var(--text-color);
   margin: 0;
+  padding: 0;
+  text-align: left;
   white-space: nowrap;
   overflow: hidden;
   text-overflow: ellipsis;
@@ -147,9 +149,18 @@
   font-size: 12px;
   color: #999;
   margin: 2px 0 0;
+  padding: 0;
+  text-align: left;
   white-space: nowrap;
   overflow: hidden;
   text-overflow: ellipsis;
+}
+
+.follower-username:hover,
+.following-username:hover,
+.follower-name:hover,
+.following-name:hover {
+  text-decoration: underline;
 }
 
 /* Follower Actions */

@@ -57,6 +57,11 @@
   font-size: 14px;
   font-weight: 600;
   margin: 0;
+  text-align: left;
+}
+
+.author-name:hover {
+  text-decoration: underline;
 }
 
 .location {
@@ -99,6 +104,7 @@
   width: 100%;
   overflow: hidden;
   background: black;
+  position: relative;
 }
 
 .post-image img {
@@ -107,6 +113,41 @@
   display: block;
   aspect-ratio: 1;
   object-fit: cover;
+}
+
+.post-image-nav {
+  position: absolute;
+  top: 50%;
+  transform: translateY(-50%);
+  width: 30px;
+  height: 30px;
+  border-radius: 50%;
+  background: rgba(0, 0, 0, 0.45);
+  color: #fff;
+  font-size: 20px;
+  line-height: 1;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+}
+
+.post-image-nav.prev {
+  left: 10px;
+}
+
+.post-image-nav.next {
+  right: 10px;
+}
+
+.post-image-counter {
+  position: absolute;
+  top: 10px;
+  right: 10px;
+  background: rgba(0, 0, 0, 0.55);
+  color: #fff;
+  font-size: 11px;
+  border-radius: 10px;
+  padding: 3px 8px;
 }
 
 /* Post Actions - Like, Comment, Share */
@@ -160,6 +201,13 @@
   color: var(--text-color);
 }
 
+.liked-by {
+  margin: 4px 0 0;
+  font-size: 12px;
+  font-weight: 400;
+  color: #666;
+}
+
 /* Post Caption */
 .post-caption {
   padding: 0 16px;
@@ -209,10 +257,41 @@
   margin-right: 4px;
 }
 
+.comment-user-link {
+  font-size: 13px;
+  font-weight: 600;
+  color: var(--text-color);
+  margin-right: 4px;
+}
+
+.comment-user-link:hover {
+  text-decoration: underline;
+}
+
 .comment p {
   display: inline;
   color: var(--text-color);
   margin: 0;
+}
+
+.comment-like-meta {
+  margin-left: 8px;
+  display: inline-flex;
+  gap: 6px;
+  align-items: center;
+}
+
+.comment-like-btn {
+  font-size: 11px;
+  color: #0095f6;
+  border: 1px solid var(--border-color);
+  border-radius: 4px;
+  padding: 2px 6px;
+}
+
+.comment-like-meta small {
+  font-size: 11px;
+  color: #777;
 }
 
 .comment-actions {

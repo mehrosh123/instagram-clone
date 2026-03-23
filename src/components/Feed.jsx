@@ -17,7 +17,7 @@ import '../styles/Feed.css'
  * 3. Props Drilling: Passes handleLike, handleComment to child components
  */
 
-export default function Feed() {
+export default function Feed({ onOpenProfile }) {
   const { currentUser } = useAuth()
   const [posts, setPosts] = useState([])
   const [pendingLikePostIds, setPendingLikePostIds] = useState([])
@@ -30,13 +30,61 @@ export default function Feed() {
   const [uploadingFiles, setUploadingFiles] = useState(false)
   const [posting, setPosting] = useState(false)
 
+  const isValidImageSource = (value) => {
+    if (typeof value !== 'string') return false
+    const src = value.trim()
+    if (!src) return false
+
+    if (src.startsWith('http://') || src.startsWith('https://')) {
+      try {
+        const parsed = new URL(src)
+        return parsed.protocol === 'http:' || parsed.protocol === 'https:'
+      } catch {
+        return false
+      }
+    }
+
+    if (src.startsWith('data:image/')) {
+      const marker = ';base64,'
+      const markerIndex = src.indexOf(marker)
+      return markerIndex > 0 && markerIndex + marker.length < src.length
+    }
+
+    return src.startsWith('blob:')
+  }
+
+  const parseImageInput = (rawValue) => {
+    const raw = String(rawValue || '').trim()
+    if (!raw) return []
+
+    // Data URLs include commas in payload; parse as one image entry.
+    if (raw.startsWith('data:image/')) {
+      return [raw]
+    }
+
+    return raw
+      .split(/[\n,]+/)
+      .map(item => item.trim())
+      .filter(Boolean)
+  }
+
   const mapPost = useCallback((post) => {
+    const normalizedImages = Array.isArray(post.images)
+      ? post.images
+        .map(item => String(item || '').trim())
+        .filter(item => item && isValidImageSource(item))
+        .slice(0, 10)
+      : []
+
     const comments = Array.isArray(post.comments)
       ? post.comments.map(comment => ({
           id: comment.id,
           userId: comment.userId,
           user: comment.author?.username || 'user',
-          text: comment.text
+          text: comment.text,
+          likes: comment.likesCount || 0,
+          liked: !!comment.likedByMe,
+          likedByUsers: (comment.likedByUsers || []).map(user => user.username)
         }))
       : []
 
@@ -46,13 +94,14 @@ export default function Feed() {
       author: post.author?.fullName || post.author?.username || 'Unknown',
       avatar: post.author?.profilePicture || '',
       username: post.author?.username || 'unknown',
-      image: Array.isArray(post.images) && post.images.length > 0
-        ? post.images[0]
+      image: normalizedImages.length > 0
+        ? normalizedImages[0]
         : 'https://images.unsplash.com/photo-1503899036084-c55cdd92da26?w=1000&auto=format&fit=crop',
-      images: post.images || [],
+      images: normalizedImages,
       caption: post.caption || '',
       likes: Number.isFinite(post.likesCount) ? post.likesCount : 0,
       liked: !!post.likedByMe,
+      likedByUsers: (post.likedByUsers || []).map(user => user.username),
       comments,
       timestamp: post.createdAt ? new Date(post.createdAt).toLocaleString() : 'Just now'
     }
@@ -95,12 +144,26 @@ export default function Feed() {
       if (target.liked) {
         const data = await apiFetch(`/api/posts/${postId}/like`, { method: 'DELETE' })
         setPosts(prev => prev.map(post =>
-          post.id === postId ? { ...post, liked: false, likes: data.likesCount } : post
+          post.id === postId
+            ? {
+                ...post,
+                liked: false,
+                likes: data.likesCount,
+                likedByUsers: data.likedByUsers || post.likedByUsers.filter(name => name !== currentUser?.username)
+              }
+            : post
         ))
       } else {
         const data = await apiFetch(`/api/posts/${postId}/like`, { method: 'POST' })
         setPosts(prev => prev.map(post =>
-          post.id === postId ? { ...post, liked: true, likes: data.likesCount } : post
+          post.id === postId
+            ? {
+                ...post,
+                liked: true,
+                likes: data.likesCount,
+                likedByUsers: data.likedByUsers || Array.from(new Set([...(post.likedByUsers || []), currentUser?.username].filter(Boolean)))
+              }
+            : post
         ))
       }
     } catch (err) {
@@ -190,11 +253,42 @@ export default function Feed() {
     }
   }
 
+  const handleCommentLike = async (postId, commentId, isLiked) => {
+    try {
+      const data = await apiFetch(`/api/comments/${commentId}/like`, {
+        method: isLiked ? 'DELETE' : 'POST'
+      })
+
+      setPosts(prev => prev.map(post =>
+        post.id === postId
+          ? {
+              ...post,
+              comments: post.comments.map(comment => {
+                if (comment.id !== commentId) return comment
+                const currentUserName = currentUser?.username || 'you'
+                const nextUsers = isLiked
+                  ? comment.likedByUsers.filter(name => name !== currentUserName)
+                  : Array.from(new Set([...comment.likedByUsers, currentUserName]))
+
+                return {
+                  ...comment,
+                  liked: !isLiked,
+                  likes: data.likesCount,
+                  likedByUsers: nextUsers
+                }
+              })
+            }
+          : post
+      ))
+    } catch (err) {
+      setFeedError(err.message || 'Failed to like comment')
+    }
+  }
+
   const parsedUrlImages = useMemo(() => {
-    return imagesInput
-      .split(',')
-      .map(item => item.trim())
-      .filter(Boolean)
+    return parseImageInput(imagesInput)
+      .filter(isValidImageSource)
+      .slice(0, 10)
   }, [imagesInput])
 
   const mergedImageCount = useMemo(() => {
@@ -248,6 +342,12 @@ export default function Feed() {
 
     if (mergedImageCount > 10) {
       setFeedError('Maximum 10 images allowed')
+      return
+    }
+
+    const rawTypedImages = parseImageInput(imagesInput)
+    if (rawTypedImages.length > 0 && rawTypedImages.some(item => !isValidImageSource(item))) {
+      setFeedError('Use valid image URLs (http/https) or one full data:image URL')
       return
     }
 
@@ -335,12 +435,23 @@ export default function Feed() {
                   placeholder="Write a caption"
                   rows={3}
                 />
-                <input
-                  type="text"
+                <textarea
                   value={imagesInput}
                   onChange={(e) => setImagesInput(e.target.value)}
-                  placeholder="Image URLs (comma-separated)"
+                  placeholder="Cloudinary image URLs (one per line or comma-separated)"
+                  rows={4}
                 />
+
+                {parsedUrlImages.length > 0 && (
+                  <div className="rounded-md border border-gray-200 p-2 bg-gray-50">
+                    <p className="text-xs text-gray-600 mb-1">Images to send in array:</p>
+                    <ul className="max-h-24 overflow-y-auto space-y-1">
+                      {parsedUrlImages.map((url, idx) => (
+                        <li key={`${url}-${idx}`} className="text-xs text-gray-700 truncate">{idx + 1}. {url}</li>
+                      ))}
+                    </ul>
+                  </div>
+                )}
 
                 <label className="file-upload-label">
                   Upload image files
@@ -390,6 +501,7 @@ export default function Feed() {
           <Post
             key={post.id}
             post={post}
+            onOpenProfile={onOpenProfile}
             onLike={handleLike}
             onComment={handleComment}
             onEdit={handleEditPost}
@@ -399,6 +511,7 @@ export default function Feed() {
             currentUserId={currentUser?.id}
             onEditComment={handleEditComment}
             onDeleteComment={handleDeleteComment}
+            onCommentLike={handleCommentLike}
           />
         ))}
       </div>

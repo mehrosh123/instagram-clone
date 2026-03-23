@@ -118,6 +118,36 @@ body {
   margin: 0;
 }
 
+.profile-link-btn {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  border-radius: 50%;
+}
+
+.profile-link-name,
+.profile-link-username {
+  display: block;
+  text-align: left;
+  padding: 0;
+}
+
+.profile-link-name {
+  font-size: 14px;
+  font-weight: 600;
+  color: var(--text-color);
+}
+
+.profile-link-username {
+  font-size: 13px;
+  color: #7c7c7c;
+}
+
+.profile-link-name:hover,
+.profile-link-username:hover {
+  text-decoration: underline;
+}
+
 .account-preview small,
 .suggested-user small {
   color: #7c7c7c;

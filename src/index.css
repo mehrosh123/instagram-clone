@@ -1,3 +1,6 @@
+@import url('https://fonts.googleapis.com/css2?family=Grand+Hotel&display=swap');
+@import "tailwindcss";
+
 /* 
   THEORY: CSS Custom Properties (Variables)
   ==========================================
@@ -6,8 +9,6 @@
   Format: --variable-name: value;
   Usage: var(--variable-name)
 */
-
-@import url('https://fonts.googleapis.com/css2?family=Grand+Hotel&display=swap');
 
 :root {
   /* Color Palette */

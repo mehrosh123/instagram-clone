@@ -1,25 +1,37 @@
-import { useState } from 'react'
+import { useEffect, useState } from 'react'
+import { useNavigate } from 'react-router-dom'
 import BrandLogo from './BrandLogo'
 import { useAuth } from '../context/AuthContext'
 import '../styles/AuthLanding.css'
 
-export default function AuthLanding() {
+export default function AuthLanding({ initialMode = 'login' }) {
   const { login, signup, isLoading, error, clearError } = useAuth()
-  const [mode, setMode] = useState('login')
+  const navigate = useNavigate()
+  const [mode, setMode] = useState(initialMode)
   const [loginData, setLoginData] = useState({ email: '', password: '' })
   const [signupData, setSignupData] = useState({
     fullName: '',
     username: '',
     email: '',
+    profilePicture: '',
+    bio: '',
+    website: '',
     password: '',
     confirmPassword: ''
   })
   const [localError, setLocalError] = useState('')
 
+  useEffect(() => {
+    setMode(initialMode)
+    setLocalError('')
+    clearError()
+  }, [initialMode, clearError])
+
   const switchMode = (nextMode) => {
     setMode(nextMode)
     setLocalError('')
     clearError()
+    navigate(nextMode === 'signup' ? '/signup' : '/login', { replace: true })
   }
 
   const handleLoginChange = (event) => {
@@ -46,7 +58,12 @@ export default function AuthLanding() {
       return
     }
 
-    await login(email, password)
+    try {
+      await login(email, password)
+      navigate('/home', { replace: true })
+    } catch {
+      // Error message is set by auth context and shown in UI.
+    }
   }
 
   const submitSignup = async (event) => {
@@ -55,6 +72,9 @@ export default function AuthLanding() {
       fullName: signupData.fullName.trim(),
       username: signupData.username.trim(),
       email: signupData.email.trim(),
+      profilePicture: signupData.profilePicture.trim(),
+      bio: signupData.bio.trim(),
+      website: signupData.website.trim(),
       password: signupData.password,
       confirmPassword: signupData.confirmPassword
     }
@@ -70,7 +90,18 @@ export default function AuthLanding() {
     }
 
     try {
-      await signup(payload.email, payload.password, payload.username, payload.fullName)
+      await signup(
+        payload.email,
+        payload.password,
+        payload.username,
+        payload.fullName,
+        payload.profilePicture,
+        {
+          bio: payload.bio,
+          website: payload.website
+        }
+      )
+      navigate('/home', { replace: true })
     } catch {
       // Error message is set by auth context and shown in UI.
     }
@@ -140,6 +171,30 @@ export default function AuthLanding() {
                 name="email"
                 placeholder="Email"
                 value={signupData.email}
+                onChange={handleSignupChange}
+                disabled={isLoading}
+              />
+              <input
+                type="url"
+                name="profilePicture"
+                placeholder="Display picture URL (optional)"
+                value={signupData.profilePicture}
+                onChange={handleSignupChange}
+                disabled={isLoading}
+              />
+              <input
+                type="text"
+                name="bio"
+                placeholder="Bio"
+                value={signupData.bio}
+                onChange={handleSignupChange}
+                disabled={isLoading}
+              />
+              <input
+                type="url"
+                name="website"
+                placeholder="Website (optional)"
+                value={signupData.website}
                 onChange={handleSignupChange}
                 disabled={isLoading}
               />

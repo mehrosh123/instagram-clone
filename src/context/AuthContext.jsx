@@ -1,7 +1,8 @@
 import { createContext, useContext, useState, useCallback } from 'react'
 
 const STORAGE_KEYS = {
-  token: 'auth_token'
+  token: 'auth_token',
+  legacyToken: 'token'
 }
 
 function getInitials(fullName = '', email = '') {
@@ -23,6 +24,16 @@ function buildUserWithInitials(user) {
 
 function storeAuthSession(token) {
   localStorage.setItem(STORAGE_KEYS.token, token)
+  localStorage.setItem(STORAGE_KEYS.legacyToken, token)
+}
+
+function clearAuthSession() {
+  localStorage.removeItem(STORAGE_KEYS.token)
+  localStorage.removeItem(STORAGE_KEYS.legacyToken)
+}
+
+function getStoredToken() {
+  return localStorage.getItem(STORAGE_KEYS.token) || localStorage.getItem(STORAGE_KEYS.legacyToken)
 }
 
 /**
@@ -61,6 +72,7 @@ export function AuthProvider({ children }) {
   const [currentUser, setCurrentUser] = useState(null)
   const [isLoading, setIsLoading] = useState(false)
   const [error, setError] = useState(null)
+  const [hasCheckedAuth, setHasCheckedAuth] = useState(false)
 
   /**
    * Database Schema for Users:
@@ -129,6 +141,7 @@ export function AuthProvider({ children }) {
       storeAuthSession(data.token)
       const user = buildUserWithInitials(data.user)
       setCurrentUser(user)
+      setHasCheckedAuth(true)
       return user
     } catch (err) {
       const message = err?.message === 'Failed to fetch'
@@ -166,6 +179,7 @@ export function AuthProvider({ children }) {
       storeAuthSession(data.token)
       const user = buildUserWithInitials(data.user)
       setCurrentUser(user)
+      setHasCheckedAuth(true)
       return user
     } catch (err) {
       const message = err?.message === 'Failed to fetch'
@@ -179,36 +193,56 @@ export function AuthProvider({ children }) {
   }, [])
 
   const logout = useCallback(() => {
-    localStorage.removeItem(STORAGE_KEYS.token)
+    clearAuthSession()
     setCurrentUser(null)
+    setHasCheckedAuth(true)
   }, [])
 
   const clearError = useCallback(() => {
     setError(null)
   }, [])
 
-  // Check if user is already logged in (e.g., on page refresh)
+  const updateCurrentUser = useCallback((updates) => {
+    setCurrentUser(prev => {
+      if (!prev) return prev
+      const merged = {
+        ...prev,
+        ...(updates || {})
+      }
+      return buildUserWithInitials(merged)
+    })
+  }, [])
+
+  // Startup auth check validates stored token and hydrates current user.
   const checkAuth = useCallback(async () => {
-    const token = localStorage.getItem(STORAGE_KEYS.token)
-    if (!token) return
+    const token = getStoredToken()
+    if (!token) {
+      setCurrentUser(null)
+      setHasCheckedAuth(true)
+      return
+    }
 
     try {
       const response = await fetch('/api/auth/me', {
-        headers: { 'Authorization': `Bearer ${token}` }
+        headers: { Authorization: `Bearer ${token}` }
       })
 
-      if (response.ok) {
-        const user = await response.json()
-        setCurrentUser(buildUserWithInitials(user))
+      if (!response.ok) {
+        clearAuthSession()
+        setCurrentUser(null)
+        setHasCheckedAuth(true)
         return
       }
 
-      logout()
-    } catch (err) {
-      console.error('Auth check failed:', err)
-      logout()
+      const user = await response.json()
+      setCurrentUser(buildUserWithInitials(user))
+      setHasCheckedAuth(true)
+    } catch {
+      clearAuthSession()
+      setCurrentUser(null)
+      setHasCheckedAuth(true)
     }
-  }, [logout])
+  }, [])
 
   const value = {
     currentUser,
@@ -219,7 +253,9 @@ export function AuthProvider({ children }) {
     login,
     logout,
     checkAuth,
-    isAuthenticated: !!currentUser
+    updateCurrentUser,
+    hasCheckedAuth,
+    isAuthenticated: !!currentUser && !!getStoredToken()
   }
 
   return (

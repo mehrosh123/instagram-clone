@@ -1,4 +1,4 @@
-import { useState } from 'react'
+import { useEffect, useState } from 'react'
 import { apiFetch } from '../api/client'
 import '../styles/Followers.css'
 
@@ -41,6 +41,35 @@ export default function FollowButton({ userId, isPrivate = false }) {
   const [isLoading, setIsLoading] = useState(false)
   const [error, setError] = useState(null)
 
+  useEffect(() => {
+    let active = true
+
+    const loadStatus = async () => {
+      const normalizedId = String(userId || '').trim()
+      if (!normalizedId || /[\s/,]/.test(normalizedId)) {
+        setIsFollowing(false)
+        setIsPending(false)
+        return
+      }
+      try {
+        const status = await apiFetch(`/api/users/${encodeURIComponent(normalizedId)}/follow-status`)
+        if (!active) return
+        setIsFollowing(!!status.isFollowing)
+        setIsPending(!!status.isPending)
+      } catch {
+        if (!active) return
+        setIsFollowing(false)
+        setIsPending(false)
+      }
+    }
+
+    loadStatus()
+
+    return () => {
+      active = false
+    }
+  }, [userId])
+
   /**
    * THEORY: Toggle Follow State
    * ===========================
@@ -55,40 +84,34 @@ export default function FollowButton({ userId, isPrivate = false }) {
   const handleFollowClick = async () => {
     if (isLoading) return
 
+    const normalizedId = String(userId || '').trim()
+    if (!normalizedId || /[\s/,]/.test(normalizedId)) return
+
     setIsLoading(true)
     setError(null)
 
-    // Optimistic update
-    if (isFollowing) {
-      setIsFollowing(false)
-    } else {
-      setIsFollowing(true)
-      if (isPrivate) {
-        setIsPending(true)
-      }
-    }
-
     try {
-      if (isFollowing) {
-        await apiFetch(`/api/users/${userId}/follow`, {
+      if (isFollowing || isPending) {
+        await apiFetch(`/api/users/${encodeURIComponent(normalizedId)}/follow`, {
           method: 'DELETE'
         })
+        setIsFollowing(false)
+        setIsPending(false)
       } else {
-        await apiFetch(`/api/users/${userId}/follow`, {
+        const relationship = await apiFetch(`/api/users/${encodeURIComponent(normalizedId)}/follow`, {
           method: 'POST'
         })
-      }
 
-      if (!isFollowing && isPrivate) {
-        // Follow request sent to private account
-        setIsPending(true)
-        setIsFollowing(false) // Don't show as following until approved
+        if (relationship.status === 'pending' || isPrivate) {
+          setIsFollowing(false)
+          setIsPending(true)
+        } else {
+          setIsFollowing(true)
+          setIsPending(false)
+        }
       }
     } catch (err) {
       setError(err.message)
-      // Rollback optimistic update
-      setIsFollowing(!isFollowing)
-      setIsPending(false)
       console.error('Follow error:', err)
     } finally {
       setIsLoading(false)
@@ -120,7 +143,7 @@ export default function FollowButton({ userId, isPrivate = false }) {
  * Shows users who follow the current user
  * Allows managing follower relationships
  */
-export function FollowersList({ currentUserId, followers, onRemove }) {
+export function FollowersList({ currentUserId, followers, onRemove, onOpenProfile }) {
   return (
     <div className="followers-list">
       <div className="followers-header">
@@ -137,8 +160,8 @@ export function FollowersList({ currentUserId, followers, onRemove }) {
                 className="follower-avatar"
               />
               <div className="follower-details">
-                <p className="follower-username">{follower.username}</p>
-                <p className="follower-name">{follower.fullName}</p>
+                <button type="button" className="follower-username" onClick={() => onOpenProfile?.(follower.username)}>{follower.username}</button>
+                <button type="button" className="follower-name" onClick={() => onOpenProfile?.(follower.username)}>{follower.fullName}</button>
               </div>
             </div>
             
@@ -164,7 +187,7 @@ export function FollowersList({ currentUserId, followers, onRemove }) {
  * ================================
  * Shows users that current user is following
  */
-export function FollowingList({ following, onUnfollow }) {
+export function FollowingList({ following, onUnfollow, onOpenProfile }) {
   return (
     <div className="following-list">
       <div className="following-header">
@@ -181,8 +204,8 @@ export function FollowingList({ following, onUnfollow }) {
                 className="following-avatar"
               />
               <div className="following-details">
-                <p className="following-username">{user.username}</p>
-                <p className="following-name">{user.fullName}</p>
+                <button type="button" className="following-username" onClick={() => onOpenProfile?.(user.username)}>{user.username}</button>
+                <button type="button" className="following-name" onClick={() => onOpenProfile?.(user.username)}>{user.fullName}</button>
               </div>
             </div>
             

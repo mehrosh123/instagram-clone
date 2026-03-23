@@ -1,4 +1,5 @@
 import { useEffect, useState } from 'react'
+import { Navigate, Route, Routes } from 'react-router-dom'
 import Feed from './components/Feed'
 import Profile from './components/Profile'
 import Sidebar from './components/Sidebar'
@@ -40,41 +41,47 @@ import './App.css'
  */
 
 function App() {
-  const { isAuthenticated, checkAuth, currentUser } = useAuth()
+  const { isAuthenticated, currentUser, checkAuth, hasCheckedAuth } = useAuth()
+
+  useEffect(() => {
+    checkAuth()
+  }, [checkAuth])
+
+  if (!hasCheckedAuth) {
+    return <SplashScreen />
+  }
+
+  return (
+    <Routes>
+      <Route
+        path="/"
+        element={<Navigate to={isAuthenticated ? '/home' : '/login'} replace />}
+      />
+      <Route
+        path="/login"
+        element={isAuthenticated ? <Navigate to="/home" replace /> : <AuthLanding initialMode="login" />}
+      />
+      <Route
+        path="/signup"
+        element={isAuthenticated ? <Navigate to="/home" replace /> : <AuthLanding initialMode="signup" />}
+      />
+      <Route
+        path="/home"
+        element={isAuthenticated ? <HomePage currentUser={currentUser} /> : <Navigate to="/login" replace />}
+      />
+      <Route
+        path="*"
+        element={<Navigate to={isAuthenticated ? '/home' : '/login'} replace />}
+      />
+    </Routes>
+  )
+}
+
+function HomePage({ currentUser }) {
   // Navigation state - tracks which page is currently shown
   const [currentPage, setCurrentPage] = useState('home')
   const [selectedUsername, setSelectedUsername] = useState('')
   const [selectedUserData, setSelectedUserData] = useState(null)
-  const [hasStoredToken, setHasStoredToken] = useState(() => !!localStorage.getItem('auth_token'))
-  const [isAuthChecked, setIsAuthChecked] = useState(false)
-
-  useEffect(() => {
-    let isMounted = true
-
-    const initializeAuth = async () => {
-      try {
-        if (hasStoredToken) {
-          await checkAuth()
-        }
-      } finally {
-        if (isMounted) {
-          setIsAuthChecked(true)
-        }
-      }
-    }
-
-    initializeAuth()
-
-    return () => {
-      isMounted = false
-    }
-  }, [checkAuth, hasStoredToken])
-
-  useEffect(() => {
-    if (!isAuthenticated) {
-      setHasStoredToken(!!localStorage.getItem('auth_token'))
-    }
-  }, [isAuthenticated])
 
   /**
    * THEORY: Event Handler (Callback)
@@ -87,12 +94,18 @@ function App() {
     setCurrentPage(page)
   }
 
-  if (hasStoredToken && !isAuthChecked) {
-    return <SplashScreen />
-  }
+  const handleOpenUserProfile = async (username) => {
+    const normalized = String(username || '').trim().replace(/^@/, '').toLowerCase()
+    if (!normalized) return
 
-  if (!isAuthenticated) {
-    return <AuthLanding />
+    try {
+      const data = await apiFetch(`/api/users/${normalized}`)
+      setSelectedUsername(normalized)
+      setSelectedUserData(data)
+      setCurrentPage('user-profile')
+    } catch {
+      // Ignore navigation when profile fetch fails.
+    }
   }
 
   return (
@@ -110,7 +123,7 @@ function App() {
               Renders Feed when currentPage is 'home'
               React only renders the active view, saving performance
             */
-            <Feed />
+            <Feed onOpenProfile={handleOpenUserProfile} />
           ) : currentPage === 'profile' ? (
             <Profile />
           ) : currentPage === 'user-profile' && selectedUserData ? (
@@ -120,7 +133,7 @@ function App() {
 
         {currentPage === 'home' && (
           <aside className="sidebar-right">
-            <SuggestedUsers currentUser={currentUser} />
+            <SuggestedUsers currentUser={currentUser} onOpenProfile={handleOpenUserProfile} />
           </aside>
         )}
       </div>
@@ -139,15 +152,16 @@ function App() {
  * Suggested users sidebar shows accounts to follow.
  * Demonstrates data-driven rendering and reusable component patterns.
  */
-function SuggestedUsers({ currentUser }) {
+function SuggestedUsers({ currentUser, onOpenProfile }) {
   const [users, setUsers] = useState([])
+  const [showAllUsers, setShowAllUsers] = useState(false)
 
   useEffect(() => {
     const loadUsers = async () => {
       try {
         const data = await apiFetch('/api/users/search?q=a')
         const filtered = (data.users || []).filter(user => user.id !== currentUser?.id)
-        setUsers(filtered.slice(0, 5))
+        setUsers(filtered)
       } catch {
         setUsers([])
       }
@@ -172,20 +186,24 @@ function SuggestedUsers({ currentUser }) {
 
       <div className="suggested-header">
         <h3>Suggested for you</h3>
-        <button type="button">See all</button>
+        <button type="button" onClick={() => setShowAllUsers(prev => !prev)}>
+          {showAllUsers ? 'See less' : 'See all'}
+        </button>
       </div>
 
-      {users.map(user => (
+      {(showAllUsers ? users : users.slice(0, 5)).map(user => (
         <div key={user.id} className="suggested-user">
           <div className="user-info">
-            {user.profilePicture ? (
-              <img src={user.profilePicture} alt={user.username} className="avatar" />
-            ) : (
-              <span className="avatar">👤</span>
-            )}
+            <button type="button" className="profile-link-btn" onClick={() => onOpenProfile?.(user.username)}>
+              {user.profilePicture ? (
+                <img src={user.profilePicture} alt={user.username} className="avatar" />
+              ) : (
+                <span className="avatar">👤</span>
+              )}
+            </button>
             <div className="user-details">
-              <p className="name">{user.fullName}</p>
-              <small>@{user.username}</small>
+              <button type="button" className="profile-link-name" onClick={() => onOpenProfile?.(user.username)}>{user.fullName}</button>
+              <button type="button" className="profile-link-username" onClick={() => onOpenProfile?.(user.username)}>@{user.username}</button>
             </div>
           </div>
           <FollowButton userId={user.id} isPrivate={user.isPrivate} />
