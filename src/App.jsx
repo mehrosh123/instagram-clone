@@ -4,6 +4,7 @@ import Feed from './components/Feed'
 import Profile from './components/Profile'
 import Sidebar from './components/Sidebar'
 import AuthLanding from './components/AuthLanding'
+import ProtectedRoute from './components/ProtectedRoute'
 import SplashScreen from './components/SplashScreen'
 import FollowButton from './components/Followers'
 import { useAuth } from './context/AuthContext'
@@ -59,15 +60,19 @@ function App() {
       />
       <Route
         path="/login"
-        element={isAuthenticated ? <Navigate to="/home" replace /> : <AuthLanding initialMode="login" />}
+        element={<AuthLanding initialMode="login" />}
       />
       <Route
         path="/signup"
-        element={isAuthenticated ? <Navigate to="/home" replace /> : <AuthLanding initialMode="signup" />}
+        element={<AuthLanding initialMode="signup" />}
       />
       <Route
         path="/home"
-        element={isAuthenticated ? <HomePage currentUser={currentUser} /> : <Navigate to="/login" replace />}
+        element={(
+          <ProtectedRoute>
+            <HomePage currentUser={currentUser} />
+          </ProtectedRoute>
+        )}
       />
       <Route
         path="*"

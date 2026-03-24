@@ -3,25 +3,39 @@ import cors from 'cors'
 import fs from 'node:fs'
 import path from 'node:path'
 import { randomUUID } from 'node:crypto'
+import process from 'node:process'
 import { fileURLToPath } from 'node:url'
 import bcrypt from 'bcryptjs'
 import jwt from 'jsonwebtoken'
-import { checkDatabaseConnection, hasDatabaseUrl } from './db/client.js'
+import {
+  checkDatabaseConnection,
+  getDatabaseTroubleshootingHint,
+  hasDatabaseUrl,
+  inspectUsersTable
+} from './db/client.js'
 import { db } from './db/client.js'
-import { comments, follows, likes, postImages, posts, users } from './db/schema.js'
-import { and, desc, eq, inArray, isNull, or, sql } from 'drizzle-orm'
+import { comments, follows, likes, postImages, posts, stories, users } from './db/schema.js'
+import { and, desc, eq, gte, inArray, isNull, or, sql } from 'drizzle-orm'
 
 const app = express()
 const PORT = process.env.PORT || 4000
 const JWT_SECRET = process.env.JWT_SECRET || 'demo-secret-change-in-production'
-const USE_POSTGRES_RUNTIME = String(process.env.USE_POSTGRES_RUNTIME || '').toLowerCase() === 'true' && hasDatabaseUrl
+const USE_POSTGRES_RUNTIME = hasDatabaseUrl && String(process.env.USE_POSTGRES_RUNTIME || 'true').toLowerCase() !== 'false'
+const IS_PRODUCTION = process.env.NODE_ENV === 'production'
 const __filename = fileURLToPath(import.meta.url)
 const __dirname = path.dirname(__filename)
 const DATA_FILE = path.join(__dirname, 'data.json')
+const STORY_TTL_MS = 24 * 60 * 60 * 1000
 
 app.use(cors({ origin: ['http://localhost:5173'], credentials: true }))
 app.use(express.json({ limit: '10mb' }))
 app.use(express.urlencoded({ extended: true, limit: '10mb' }))
+app.use((_req, res, next) => {
+  res.setHeader('Cache-Control', 'no-store')
+  res.setHeader('Pragma', 'no-cache')
+  res.setHeader('Expires', '0')
+  next()
+})
 
 function readDb() {
   if (!fs.existsSync(DATA_FILE)) {
@@ -89,7 +103,16 @@ function readDb() {
   db.comments = Array.isArray(db.comments) ? db.comments.filter(item => item && typeof item === 'object') : []
   db.likes = Array.isArray(db.likes) ? db.likes.filter(item => item && typeof item === 'object') : []
   db.follows = Array.isArray(db.follows) ? db.follows.filter(item => item && typeof item === 'object') : []
-  db.stories = Array.isArray(db.stories) ? db.stories.filter(item => item && typeof item === 'object') : []
+  db.stories = Array.isArray(db.stories)
+    ? db.stories
+      .filter(item => item && typeof item === 'object')
+      .map(story => ({
+        ...story,
+        imageUrl: typeof story.imageUrl === 'string' ? story.imageUrl : '',
+        createdAt: typeof story.createdAt === 'string' ? story.createdAt : new Date(0).toISOString()
+      }))
+      .filter(story => story.imageUrl)
+    : []
 
   return db
 }
@@ -109,27 +132,92 @@ function syncPostCounters(db) {
 }
 
 function safeUser(user) {
-  const { passwordHash, ...rest } = user
+  const { passwordHash: _passwordHash, ...rest } = user
   return rest
 }
 
-function toApiUserFromDb(user) {
+function toApiUserFromDb(user, followStats = null) {
   if (!user) return null
   return {
     id: user.id,
     email: user.email,
     username: user.username,
-    fullName: user.fullName,
+    fullName: user.fullName || '',
     bio: user.bio || '',
     website: user.website || '',
-    profilePicture: user.profilePictureUrl || '',
+    profilePicture: user.profilePictureUrl || user.profilePicture || '',
     isPrivate: !!user.isPrivate,
     isVerified: !!user.isVerified,
-    followerCount: Number(user.followerCount || 0),
-    followingCount: Number(user.followingCount || 0),
+    followerCount: Number(followStats?.followerCount ?? user.followerCount ?? 0),
+    followingCount: Number(followStats?.followingCount ?? user.followingCount ?? 0),
     createdAt: user.createdAt,
     updatedAt: user.updatedAt,
     deletedAt: user.deletedAt || null
+  }
+}
+
+function createFollowStatsMap(userIds = []) {
+  const uniqueIds = [...new Set(userIds.filter(Boolean))]
+  return new Map(uniqueIds.map(id => [id, { followerCount: 0, followingCount: 0 }]))
+}
+
+function applyFollowRowsToStatsMap(statsMap, followRows = []) {
+  for (const follow of followRows) {
+    if (statsMap.has(follow.followerId)) {
+      statsMap.get(follow.followerId).followingCount += 1
+    }
+    if (statsMap.has(follow.followingId)) {
+      statsMap.get(follow.followingId).followerCount += 1
+    }
+  }
+  return statsMap
+}
+
+async function getFollowStatsMapFromDb(userIds = []) {
+  const statsMap = createFollowStatsMap(userIds)
+  const ids = [...statsMap.keys()]
+  if (ids.length === 0) return statsMap
+
+  const followRows = await db
+    .select({
+      followerId: follows.followerId,
+      followingId: follows.followingId
+    })
+    .from(follows)
+    .where(and(
+      eq(follows.status, 'accepted'),
+      or(
+        inArray(follows.followerId, ids),
+        inArray(follows.followingId, ids)
+      )
+    ))
+
+  return applyFollowRowsToStatsMap(statsMap, followRows)
+}
+
+function getFollowStatsMapFromJson(userIds = [], dbState) {
+  const statsMap = createFollowStatsMap(userIds)
+  const ids = [...statsMap.keys()]
+  if (ids.length === 0) return statsMap
+
+  const followRows = dbState.follows.filter(
+    follow => follow.status === 'accepted' && (ids.includes(follow.followerId) || ids.includes(follow.followingId))
+  )
+
+  return applyFollowRowsToStatsMap(statsMap, followRows)
+}
+
+function attachFollowStats(usersList = [], statsMap = new Map()) {
+  return usersList.map(user => toApiUserFromDb(user, statsMap.get(user.id)))
+}
+
+function serializeFollowUser(user, relation, statsMap = new Map()) {
+  if (!user || !relation) return null
+  return {
+    ...toApiUserFromDb(user, statsMap.get(user.id)),
+    followId: relation.id,
+    followedAt: relation.createdAt,
+    status: relation.status
   }
 }
 
@@ -148,8 +236,75 @@ function toApiPostFromDb(post, images = []) {
   }
 }
 
+function toStoryOwner(user) {
+  if (!user) return null
+  return {
+    id: user.id,
+    username: user.username,
+    fullName: user.fullName,
+    profilePicture: user.profilePictureUrl || user.profilePicture || ''
+  }
+}
+
+function toApiStory(story, owner) {
+  return {
+    id: story.id,
+    userId: story.userId,
+    imageUrl: story.imageUrl,
+    createdAt: story.createdAt,
+    user: toStoryOwner(owner)
+  }
+}
+
+function getStoryCutoffDate() {
+  return new Date(Date.now() - STORY_TTL_MS)
+}
+
 function issueToken(userId) {
   return jwt.sign({ sub: userId }, JWT_SECRET, { expiresIn: '7d' })
+}
+
+function isUuid(value) {
+  return /^[0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i.test(String(value || ''))
+}
+
+async function buildDatabaseDebugInfo() {
+  if (!USE_POSTGRES_RUNTIME) {
+    return {
+      storageMode: 'json-file',
+      database: {
+        ok: false,
+        message: 'Neon runtime is not active.'
+      },
+      usersTable: null
+    }
+  }
+
+  const [database, usersTable] = await Promise.all([
+    checkDatabaseConnection(),
+    inspectUsersTable()
+  ])
+
+  return {
+    storageMode: 'postgres',
+    database,
+    usersTable
+  }
+}
+
+async function sendDatabaseError(res, publicMessage, error) {
+  const debugInfo = await buildDatabaseDebugInfo()
+  const payload = {
+    error: publicMessage,
+    hint: getDatabaseTroubleshootingHint(error, debugInfo.usersTable)
+  }
+
+  if (!IS_PRODUCTION) {
+    payload.details = error?.message || 'Unknown database error'
+    payload.debug = debugInfo
+  }
+
+  return res.status(500).json(payload)
 }
 
 function authRequired(req, res, next) {
@@ -162,7 +317,11 @@ function authRequired(req, res, next) {
 
   try {
     const payload = jwt.verify(token, JWT_SECRET)
+    if (!isUuid(payload.sub)) {
+      return res.status(401).json({ error: 'Invalid token subject. Clear localStorage and sign in again.' })
+    }
     req.userId = payload.sub
+    req.user = { id: payload.sub }
     next()
   } catch {
     return res.status(401).json({ error: 'Invalid token' })
@@ -177,14 +336,6 @@ function canViewUserContent(viewerId, owner, db) {
   return db.follows.some(
     f => f.followerId === viewerId && f.followingId === owner.id && f.status === 'accepted'
   )
-}
-
-function normalizeWebsite(value = '') {
-  return String(value || '').trim().toLowerCase().replace(/\/+$/, '')
-}
-
-function normalizeBio(value = '') {
-  return String(value || '').trim().toLowerCase()
 }
 
 function isValidImageSource(value) {
@@ -212,13 +363,21 @@ function isValidImageSource(value) {
 
 app.get('/api/health', async (_req, res) => {
   const dbStatus = await checkDatabaseConnection()
+  const usersTable = USE_POSTGRES_RUNTIME ? await inspectUsersTable() : null
   res.json({
     ok: true,
     service: 'instagram-clone-backend',
     database: dbStatus.ok ? 'connected' : 'disconnected',
     databaseMessage: dbStatus.message,
-    storageMode: hasDatabaseUrl ? 'postgres' : 'json-file'
+    storageMode: USE_POSTGRES_RUNTIME ? 'postgres' : 'json-file',
+    usersTable
   })
+})
+
+app.get('/api/debug/database', async (_req, res) => {
+  const debugInfo = await buildDatabaseDebugInfo()
+  const status = debugInfo.database.ok ? 200 : 500
+  res.status(status).json(debugInfo)
 })
 
 app.post('/api/auth/signup', async (req, res) => {
@@ -242,9 +401,7 @@ app.post('/api/auth/signup', async (req, res) => {
       const normalizedEmail = String(email).trim().toLowerCase()
       const normalizedUsername = String(username).trim().toLowerCase().replace(/^@/, '')
       const trimmedBio = String(bio || '').trim()
-      const normalizedBioValue = normalizeBio(trimmedBio)
       const trimmedWebsite = String(website || '').trim()
-      const normalizedWebsiteValue = normalizeWebsite(trimmedWebsite)
 
       const existingUsers = await db
         .select()
@@ -256,28 +413,6 @@ app.post('/api/auth/signup', async (req, res) => {
       }
       if (existingUsers.some(u => u.username === normalizedUsername)) {
         return res.status(409).json({ error: 'Username already exists' })
-      }
-
-      if (normalizedBioValue) {
-        const bioDuplicate = await db
-          .select({ id: users.id, bio: users.bio })
-          .from(users)
-          .where(eq(users.bio, trimmedBio))
-          .limit(1)
-        if (bioDuplicate.length > 0) {
-          return res.status(409).json({ error: 'Bio already exists. Please use a different bio.' })
-        }
-      }
-
-      if (normalizedWebsiteValue) {
-        const websiteCandidates = await db
-          .select({ id: users.id, website: users.website })
-          .from(users)
-          .where(sql`lower(${users.website}) = ${normalizedWebsiteValue}`)
-          .limit(1)
-        if (websiteCandidates.length > 0) {
-          return res.status(409).json({ error: 'Website already exists. Please use a different website.' })
-        }
       }
 
       const passwordHash = await bcrypt.hash(String(password), 10)
@@ -298,28 +433,23 @@ app.post('/api/auth/signup', async (req, res) => {
 
       const createdUser = inserted[0]
       const token = issueToken(createdUser.id)
-      return res.status(201).json({ token, user: toApiUserFromDb(createdUser) })
+      return res.status(201).json({
+        token,
+        user: toApiUserFromDb(createdUser, { followerCount: 0, followingCount: 0 })
+      })
     }
 
-    const db = readDb()
+    const dbState = readDb()
     const normalizedEmail = String(email).trim().toLowerCase()
     const normalizedUsername = String(username).trim().toLowerCase().replace(/^@/, '')
     const trimmedBio = String(bio || '').trim()
-    const normalizedBioValue = normalizeBio(trimmedBio)
     const trimmedWebsite = String(website || '').trim()
-    const normalizedWebsiteValue = normalizeWebsite(trimmedWebsite)
 
-    if (db.users.some(u => String(u?.email || '').toLowerCase() === normalizedEmail)) {
+    if (dbState.users.some(u => String(u?.email || '').toLowerCase() === normalizedEmail)) {
       return res.status(409).json({ error: 'Email already exists' })
     }
-    if (db.users.some(u => String(u?.username || '').toLowerCase() === normalizedUsername)) {
+    if (dbState.users.some(u => String(u?.username || '').toLowerCase() === normalizedUsername)) {
       return res.status(409).json({ error: 'Username already exists' })
-    }
-    if (normalizedBioValue && db.users.some(u => normalizeBio(u?.bio) === normalizedBioValue)) {
-      return res.status(409).json({ error: 'Bio already exists. Please use a different bio.' })
-    }
-    if (normalizedWebsiteValue && db.users.some(u => normalizeWebsite(u?.website) === normalizedWebsiteValue)) {
-      return res.status(409).json({ error: 'Website already exists. Please use a different website.' })
     }
 
     const passwordHash = await bcrypt.hash(String(password), 10)
@@ -343,32 +473,55 @@ app.post('/api/auth/signup', async (req, res) => {
       deletedAt: null
     }
 
-    db.users.push(user)
-    writeDb(db)
+    dbState.users.push(user)
+    writeDb(dbState)
 
     const token = issueToken(user.id)
-    return res.status(201).json({ token, user: safeUser(user) })
+    const statsMap = getFollowStatsMapFromJson([user.id], dbState)
+    return res.status(201).json({ token, user: toApiUserFromDb(user, statsMap.get(user.id)) })
   } catch (err) {
     console.error('Signup error:', err)
+    if (USE_POSTGRES_RUNTIME) {
+      return sendDatabaseError(res, 'Signup failed due to a database error', err)
+    }
     return res.status(500).json({ error: err?.message || 'Signup failed due to server error' })
   }
 })
 
 app.post('/api/auth/login', async (req, res) => {
-  const { email, password } = req.body
-  if (!email || !password) {
-    return res.status(400).json({ error: 'email and password are required' })
-  }
+  try {
+    const { email, password } = req.body
+    if (!email || !password) {
+      return res.status(400).json({ error: 'email and password are required' })
+    }
 
-  if (USE_POSTGRES_RUNTIME && db) {
+    if (USE_POSTGRES_RUNTIME && db) {
+      const normalizedEmail = String(email).trim().toLowerCase()
+      const rows = await db
+        .select()
+        .from(users)
+        .where(and(eq(users.email, normalizedEmail), isNull(users.deletedAt)))
+        .limit(1)
+
+      const user = rows[0]
+      if (!user) {
+        return res.status(401).json({ error: 'Invalid credentials' })
+      }
+
+      const valid = await bcrypt.compare(password, user.passwordHash)
+      if (!valid) {
+        return res.status(401).json({ error: 'Invalid credentials' })
+      }
+
+      const token = issueToken(user.id)
+      const statsMap = await getFollowStatsMapFromDb([user.id])
+      return res.json({ token, user: toApiUserFromDb(user, statsMap.get(user.id)) })
+    }
+
+    const dbState = readDb()
     const normalizedEmail = String(email).trim().toLowerCase()
-    const rows = await db
-      .select()
-      .from(users)
-      .where(and(eq(users.email, normalizedEmail), isNull(users.deletedAt)))
-      .limit(1)
+    const user = dbState.users.find(u => u.email === normalizedEmail)
 
-    const user = rows[0]
     if (!user) {
       return res.status(401).json({ error: 'Invalid credentials' })
     }
@@ -379,24 +532,15 @@ app.post('/api/auth/login', async (req, res) => {
     }
 
     const token = issueToken(user.id)
-    return res.json({ token, user: toApiUserFromDb(user) })
+    const statsMap = getFollowStatsMapFromJson([user.id], dbState)
+    return res.json({ token, user: toApiUserFromDb(user, statsMap.get(user.id)) })
+  } catch (err) {
+    console.error('Login error:', err)
+    if (USE_POSTGRES_RUNTIME) {
+      return sendDatabaseError(res, 'Login failed due to a database error', err)
+    }
+    return res.status(500).json({ error: err?.message || 'Login failed due to server error' })
   }
-
-  const db = readDb()
-  const normalizedEmail = String(email).trim().toLowerCase()
-  const user = db.users.find(u => u.email === normalizedEmail)
-
-  if (!user) {
-    return res.status(401).json({ error: 'Invalid credentials' })
-  }
-
-  const valid = await bcrypt.compare(password, user.passwordHash)
-  if (!valid) {
-    return res.status(401).json({ error: 'Invalid credentials' })
-  }
-
-  const token = issueToken(user.id)
-  return res.json({ token, user: safeUser(user) })
 })
 
 app.get('/api/auth/me', authRequired, (req, res) => {
@@ -409,19 +553,20 @@ app.get('/api/auth/me', authRequired, (req, res) => {
       .then(rows => {
         const user = rows[0]
         if (!user) return res.status(404).json({ error: 'User not found' })
-        return res.json(toApiUserFromDb(user))
+        return getFollowStatsMapFromDb([user.id]).then(statsMap => res.json(toApiUserFromDb(user, statsMap.get(user.id))))
       })
       .catch(err => {
         console.error('Auth me DB error:', err)
-        return res.status(500).json({ error: 'Failed to load current user' })
+        return sendDatabaseError(res, 'Failed to load current user', err)
       })
     return
   }
 
-  const db = readDb()
-  const user = db.users.find(u => u.id === req.userId)
+  const dbState = readDb()
+  const user = dbState.users.find(u => u.id === req.userId)
   if (!user) return res.status(404).json({ error: 'User not found' })
-  return res.json(safeUser(user))
+  const statsMap = getFollowStatsMapFromJson([user.id], dbState)
+  return res.json(toApiUserFromDb(user, statsMap.get(user.id)))
 })
 
 app.post('/api/posts', authRequired, async (req, res) => {
@@ -476,7 +621,7 @@ app.post('/api/posts', authRequired, async (req, res) => {
     }
   }
 
-  const db = readDb()
+  const dbState = readDb()
   const now = new Date().toISOString()
 
   const post = {
@@ -492,8 +637,8 @@ app.post('/api/posts', authRequired, async (req, res) => {
     deletedAt: null
   }
 
-  db.posts.push(post)
-  writeDb(db)
+  dbState.posts.push(post)
+  writeDb(dbState)
   return res.status(201).json(post)
 })
 
@@ -633,30 +778,30 @@ app.get('/api/posts/feed', authRequired, async (req, res) => {
     }
   }
 
-  const db = readDb()
-  syncPostCounters(db)
-  const feed = db.posts
+  const dbState = readDb()
+  syncPostCounters(dbState)
+  const feed = dbState.posts
     .filter(post => !post.deletedAt)
     .filter(post => {
-      const owner = db.users.find(u => u.id === post.userId)
-      return canViewUserContent(req.userId, owner, db)
+      const owner = dbState.users.find(u => u.id === post.userId)
+      return canViewUserContent(req.userId, owner, dbState)
     })
     .sort((a, b) => new Date(b.createdAt) - new Date(a.createdAt))
     .map(post => {
-      const owner = db.users.find(u => u.id === post.userId)
-      const postLikes = db.likes.filter(like => like.postId === post.id && !like.commentId)
+      const owner = dbState.users.find(u => u.id === post.userId)
+      const postLikes = dbState.likes.filter(like => like.postId === post.id && !like.commentId)
       const likedByUsers = postLikes
-        .map(like => db.users.find(user => user.id === like.userId))
+        .map(like => dbState.users.find(user => user.id === like.userId))
         .filter(Boolean)
         .map(user => safeUser(user))
 
-      const comments = db.comments
+      const comments = dbState.comments
         .filter(comment => comment.postId === post.id && !comment.deletedAt)
         .map(comment => {
-          const author = db.users.find(user => user.id === comment.userId)
-          const commentLikes = db.likes.filter(like => like.commentId === comment.id)
+          const author = dbState.users.find(user => user.id === comment.userId)
+          const commentLikes = dbState.likes.filter(like => like.commentId === comment.id)
           const commentLikedByUsers = commentLikes
-            .map(like => db.users.find(user => user.id === like.userId))
+            .map(like => dbState.users.find(user => user.id === like.userId))
             .filter(Boolean)
             .map(user => safeUser(user))
 
@@ -753,8 +898,8 @@ app.put('/api/posts/:id', authRequired, async (req, res) => {
     }
   }
 
-  const db = readDb()
-  const post = db.posts.find(p => p.id === req.params.id && !p.deletedAt)
+  const dbState = readDb()
+  const post = dbState.posts.find(p => p.id === req.params.id && !p.deletedAt)
   if (!post) return res.status(404).json({ error: 'Post not found' })
   if (post.userId !== req.userId) {
     return res.status(403).json({ error: 'Only owner can edit this post' })
@@ -785,7 +930,7 @@ app.put('/api/posts/:id', authRequired, async (req, res) => {
   post.isEdited = true
   post.updatedAt = new Date().toISOString()
 
-  writeDb(db)
+  writeDb(dbState)
   res.json(post)
 })
 
@@ -815,8 +960,8 @@ app.delete('/api/posts/:id', authRequired, async (req, res) => {
     }
   }
 
-  const db = readDb()
-  const post = db.posts.find(p => p.id === req.params.id && !p.deletedAt)
+  const dbState = readDb()
+  const post = dbState.posts.find(p => p.id === req.params.id && !p.deletedAt)
   if (!post) return res.status(404).json({ error: 'Post not found' })
   if (post.userId !== req.userId) {
     return res.status(403).json({ error: 'Only owner can delete this post' })
@@ -824,7 +969,7 @@ app.delete('/api/posts/:id', authRequired, async (req, res) => {
 
   post.deletedAt = new Date().toISOString()
   post.updatedAt = new Date().toISOString()
-  writeDb(db)
+  writeDb(dbState)
   res.status(204).send()
 })
 
@@ -893,12 +1038,12 @@ app.post('/api/posts/:id/comments', authRequired, async (req, res) => {
     }
   }
 
-  const db = readDb()
-  const post = db.posts.find(p => p.id === req.params.id && !p.deletedAt)
+  const dbState = readDb()
+  const post = dbState.posts.find(p => p.id === req.params.id && !p.deletedAt)
   if (!post) return res.status(404).json({ error: 'Post not found' })
 
-  const owner = db.users.find(u => u.id === post.userId)
-  if (!canViewUserContent(req.userId, owner, db)) {
+  const owner = dbState.users.find(u => u.id === post.userId)
+  if (!canViewUserContent(req.userId, owner, dbState)) {
     return res.status(403).json({ error: 'Not allowed to comment on this post' })
   }
 
@@ -915,9 +1060,9 @@ app.post('/api/posts/:id/comments', authRequired, async (req, res) => {
     deletedAt: null
   }
 
-  db.comments.push(comment)
+  dbState.comments.push(comment)
   post.commentsCount += 1
-  writeDb(db)
+  writeDb(dbState)
   res.status(201).json(comment)
 })
 
@@ -962,11 +1107,11 @@ app.put('/api/comments/:id', authRequired, async (req, res) => {
     }
   }
 
-  const db = readDb()
-  const comment = db.comments.find(c => c.id === req.params.id && !c.deletedAt)
+  const dbState = readDb()
+  const comment = dbState.comments.find(c => c.id === req.params.id && !c.deletedAt)
   if (!comment) return res.status(404).json({ error: 'Comment not found' })
 
-  const post = db.posts.find(p => p.id === comment.postId && !p.deletedAt)
+  const post = dbState.posts.find(p => p.id === comment.postId && !p.deletedAt)
   const canManage = comment.userId === req.userId || post?.userId === req.userId
   if (!canManage) {
     return res.status(403).json({ error: 'Not allowed to edit this comment' })
@@ -979,7 +1124,7 @@ app.put('/api/comments/:id', authRequired, async (req, res) => {
 
   comment.text = String(text)
   comment.updatedAt = new Date().toISOString()
-  writeDb(db)
+  writeDb(dbState)
   res.json(comment)
 })
 
@@ -1025,11 +1170,11 @@ app.delete('/api/comments/:id', authRequired, async (req, res) => {
     }
   }
 
-  const db = readDb()
-  const comment = db.comments.find(c => c.id === req.params.id && !c.deletedAt)
+  const dbState = readDb()
+  const comment = dbState.comments.find(c => c.id === req.params.id && !c.deletedAt)
   if (!comment) return res.status(404).json({ error: 'Comment not found' })
 
-  const post = db.posts.find(p => p.id === comment.postId && !p.deletedAt)
+  const post = dbState.posts.find(p => p.id === comment.postId && !p.deletedAt)
   const canManage = comment.userId === req.userId || post?.userId === req.userId
   if (!canManage) {
     return res.status(403).json({ error: 'Not allowed to delete this comment' })
@@ -1038,7 +1183,7 @@ app.delete('/api/comments/:id', authRequired, async (req, res) => {
   comment.deletedAt = new Date().toISOString()
   comment.updatedAt = new Date().toISOString()
   if (post && post.commentsCount > 0) post.commentsCount -= 1
-  writeDb(db)
+  writeDb(dbState)
   res.status(204).send()
 })
 
@@ -1085,31 +1230,31 @@ app.post('/api/posts/:id/like', authRequired, async (req, res) => {
     }
   }
 
-  const db = readDb()
-  const post = db.posts.find(p => p.id === req.params.id && !p.deletedAt)
+  const dbState = readDb()
+  const post = dbState.posts.find(p => p.id === req.params.id && !p.deletedAt)
   if (!post) return res.status(404).json({ error: 'Post not found' })
 
-  const existing = db.likes.find(l => l.userId === req.userId && l.postId === post.id && !l.commentId)
+  const existing = dbState.likes.find(l => l.userId === req.userId && l.postId === post.id && !l.commentId)
   if (existing) {
-    syncPostCounters(db)
-    const likedByUsers = db.likes
+    syncPostCounters(dbState)
+    const likedByUsers = dbState.likes
       .filter(like => like.postId === post.id && !like.commentId)
-      .map(like => db.users.find(user => user.id === like.userId)?.username)
+      .map(like => dbState.users.find(user => user.id === like.userId)?.username)
       .filter(Boolean)
     return res.status(200).json({ liked: true, likesCount: post.likesCount, likedByUsers })
   }
 
-  db.likes.push({
+  dbState.likes.push({
     id: randomUUID(),
     userId: req.userId,
     postId: post.id,
     commentId: null,
     createdAt: new Date().toISOString()
   })
-  writeDb(db)
-  const likedByUsers = db.likes
+  writeDb(dbState)
+  const likedByUsers = dbState.likes
     .filter(like => like.postId === post.id && !like.commentId)
-    .map(like => db.users.find(user => user.id === like.userId)?.username)
+    .map(like => dbState.users.find(user => user.id === like.userId)?.username)
     .filter(Boolean)
   res.status(201).json({ liked: true, likesCount: likedByUsers.length, likedByUsers })
 })
@@ -1151,25 +1296,25 @@ app.delete('/api/posts/:id/like', authRequired, async (req, res) => {
     }
   }
 
-  const db = readDb()
-  const post = db.posts.find(p => p.id === req.params.id && !p.deletedAt)
+  const dbState = readDb()
+  const post = dbState.posts.find(p => p.id === req.params.id && !p.deletedAt)
   if (!post) return res.status(404).json({ error: 'Post not found' })
 
-  const index = db.likes.findIndex(l => l.userId === req.userId && l.postId === post.id && !l.commentId)
+  const index = dbState.likes.findIndex(l => l.userId === req.userId && l.postId === post.id && !l.commentId)
   if (index === -1) {
-    syncPostCounters(db)
-    const likedByUsers = db.likes
+    syncPostCounters(dbState)
+    const likedByUsers = dbState.likes
       .filter(like => like.postId === post.id && !like.commentId)
-      .map(like => db.users.find(user => user.id === like.userId)?.username)
+      .map(like => dbState.users.find(user => user.id === like.userId)?.username)
       .filter(Boolean)
     return res.status(200).json({ liked: false, likesCount: post.likesCount, likedByUsers })
   }
 
-  db.likes.splice(index, 1)
-  writeDb(db)
-  const likedByUsers = db.likes
+  dbState.likes.splice(index, 1)
+  writeDb(dbState)
+  const likedByUsers = dbState.likes
     .filter(like => like.postId === post.id && !like.commentId)
-    .map(like => db.users.find(user => user.id === like.userId)?.username)
+    .map(like => dbState.users.find(user => user.id === like.userId)?.username)
     .filter(Boolean)
   res.json({ liked: false, likesCount: likedByUsers.length, likedByUsers })
 })
@@ -1220,25 +1365,25 @@ app.post('/api/comments/:id/like', authRequired, async (req, res) => {
     }
   }
 
-  const db = readDb()
-  const comment = db.comments.find(c => c.id === req.params.id && !c.deletedAt)
+  const dbState = readDb()
+  const comment = dbState.comments.find(c => c.id === req.params.id && !c.deletedAt)
   if (!comment) return res.status(404).json({ error: 'Comment not found' })
 
-  const post = db.posts.find(p => p.id === comment.postId && !p.deletedAt)
+  const post = dbState.posts.find(p => p.id === comment.postId && !p.deletedAt)
   if (!post) return res.status(404).json({ error: 'Post not found' })
 
-  const owner = db.users.find(u => u.id === post.userId)
-  if (!canViewUserContent(req.userId, owner, db)) {
+  const owner = dbState.users.find(u => u.id === post.userId)
+  if (!canViewUserContent(req.userId, owner, dbState)) {
     return res.status(403).json({ error: 'Not allowed to like this comment' })
   }
 
-  const existing = db.likes.find(l => l.userId === req.userId && l.commentId === comment.id)
+  const existing = dbState.likes.find(l => l.userId === req.userId && l.commentId === comment.id)
   if (existing) {
-    const likesCount = db.likes.filter(l => l.commentId === comment.id).length
+    const likesCount = dbState.likes.filter(l => l.commentId === comment.id).length
     return res.status(200).json({ liked: true, likesCount })
   }
 
-  db.likes.push({
+  dbState.likes.push({
     id: randomUUID(),
     userId: req.userId,
     postId: comment.postId,
@@ -1246,8 +1391,8 @@ app.post('/api/comments/:id/like', authRequired, async (req, res) => {
     createdAt: new Date().toISOString()
   })
 
-  writeDb(db)
-  const likesCount = db.likes.filter(l => l.commentId === comment.id).length
+  writeDb(dbState)
+  const likesCount = dbState.likes.filter(l => l.commentId === comment.id).length
   res.status(201).json({ liked: true, likesCount })
 })
 
@@ -1283,72 +1428,192 @@ app.delete('/api/comments/:id/like', authRequired, async (req, res) => {
     }
   }
 
-  const db = readDb()
-  const comment = db.comments.find(c => c.id === req.params.id && !c.deletedAt)
+  const dbState = readDb()
+  const comment = dbState.comments.find(c => c.id === req.params.id && !c.deletedAt)
   if (!comment) return res.status(404).json({ error: 'Comment not found' })
 
-  const index = db.likes.findIndex(l => l.userId === req.userId && l.commentId === comment.id)
+  const index = dbState.likes.findIndex(l => l.userId === req.userId && l.commentId === comment.id)
   if (index === -1) {
-    const likesCount = db.likes.filter(l => l.commentId === comment.id).length
+    const likesCount = dbState.likes.filter(l => l.commentId === comment.id).length
     return res.status(200).json({ liked: false, likesCount })
   }
 
-  db.likes.splice(index, 1)
-  writeDb(db)
-  const likesCount = db.likes.filter(l => l.commentId === comment.id).length
+  dbState.likes.splice(index, 1)
+  writeDb(dbState)
+  const likesCount = dbState.likes.filter(l => l.commentId === comment.id).length
   res.json({ liked: false, likesCount })
 })
 
-app.post('/api/stories', authRequired, (req, res) => {
-  const { imageUrl, caption = '' } = req.body
-  if (!imageUrl) return res.status(400).json({ error: 'imageUrl is required' })
+app.post('/api/stories', authRequired, async (req, res) => {
+  const imageUrl = String(req.body?.imageUrl ?? req.body?.image_url ?? '').trim()
+  const requestedUserId = String(req.body?.userId ?? req.body?.user_id ?? '').trim()
+  if (!imageUrl) {
+    return res.status(400).json({ error: 'imageUrl is required' })
+  }
+  if (requestedUserId && requestedUserId !== req.user.id) {
+    return res.status(403).json({ error: 'You can only create stories for your own account' })
+  }
+  if (!isValidImageSource(imageUrl) || imageUrl.startsWith('data:') || imageUrl.startsWith('blob:')) {
+    return res.status(400).json({ error: 'Story image must be a valid image URL' })
+  }
 
-  const now = new Date()
-  const expiresAt = new Date(now.getTime() + 24 * 60 * 60 * 1000)
-  const db = readDb()
+  if (USE_POSTGRES_RUNTIME && db) {
+    try {
+      const insertedStories = await db
+        .insert(stories)
+        .values({
+          userId: requestedUserId || req.user.id,
+          imageUrl
+        })
+        .returning()
 
+      const createdStory = insertedStories[0]
+      const ownerRows = await db
+        .select()
+        .from(users)
+        .where(and(eq(users.id, createdStory.userId), isNull(users.deletedAt)))
+        .limit(1)
+
+      return res.status(201).json(toApiStory(createdStory, ownerRows[0]))
+    } catch (err) {
+      console.error('Create story DB error:', err)
+      return res.status(500).json({ error: 'Failed to create story' })
+    }
+  }
+
+  const dbState = readDb()
   const story = {
     id: randomUUID(),
-    userId: req.userId,
-    imageUrl: String(imageUrl),
-    caption: String(caption),
-    createdAt: now.toISOString(),
-    expiresAt: expiresAt.toISOString(),
-    deletedAt: null
+    userId: requestedUserId || req.user.id,
+    imageUrl,
+    createdAt: new Date().toISOString()
   }
 
-  db.stories.push(story)
-  writeDb(db)
-  res.status(201).json(story)
+  dbState.stories.push(story)
+  writeDb(dbState)
+
+  const owner = dbState.users.find(user => user.id === story.userId)
+  return res.status(201).json(toApiStory(story, owner))
 })
 
-app.get('/api/stories/feed', authRequired, (req, res) => {
-  const db = readDb()
-  const now = Date.now()
+const getStoriesHandler = async (req, res) => {
+  const storyCutoffDate = getStoryCutoffDate()
 
-  const stories = db.stories
-    .filter(s => !s.deletedAt)
-    .filter(s => new Date(s.expiresAt).getTime() > now)
-    .filter(s => {
-      const owner = db.users.find(u => u.id === s.userId)
-      return canViewUserContent(req.userId, owner, db)
+  if (USE_POSTGRES_RUNTIME && db) {
+    try {
+      const recentStories = await db
+        .select()
+        .from(stories)
+        .where(gte(stories.createdAt, storyCutoffDate))
+        .orderBy(desc(stories.createdAt))
+
+      if (recentStories.length === 0) {
+        return res.json({ stories: [] })
+      }
+
+      const ownerIds = [...new Set(recentStories.map(story => story.userId))]
+      const ownerRows = ownerIds.length > 0
+        ? await db
+          .select()
+          .from(users)
+          .where(and(inArray(users.id, ownerIds), isNull(users.deletedAt)))
+        : []
+      const ownerMap = new Map(ownerRows.map(user => [user.id, user]))
+
+      const privateOwnerIds = ownerRows
+        .filter(user => user.isPrivate && user.id !== req.user.id)
+        .map(user => user.id)
+
+      const followRows = privateOwnerIds.length > 0
+        ? await db
+          .select()
+          .from(follows)
+          .where(and(
+            eq(follows.followerId, req.user.id),
+            eq(follows.status, 'accepted'),
+            inArray(follows.followingId, privateOwnerIds)
+          ))
+        : []
+      const allowedPrivateIds = new Set(followRows.map(follow => follow.followingId))
+
+      const visibleStories = recentStories
+        .filter(story => {
+          const owner = ownerMap.get(story.userId)
+          if (!owner) return false
+          if (!owner.isPrivate) return true
+          if (owner.id === req.user.id) return true
+          return allowedPrivateIds.has(owner.id)
+        })
+        .map(story => toApiStory(story, ownerMap.get(story.userId)))
+
+      return res.json({ stories: visibleStories })
+    } catch (err) {
+      console.error('Load stories DB error:', err)
+      return res.status(500).json({ error: 'Failed to load stories' })
+    }
+  }
+
+  const dbState = readDb()
+  const storyCutoffMs = storyCutoffDate.getTime()
+
+  const visibleStories = dbState.stories
+    .filter(story => new Date(story.createdAt).getTime() >= storyCutoffMs)
+    .filter(story => {
+      const owner = dbState.users.find(user => user.id === story.userId)
+      return canViewUserContent(req.user.id, owner, dbState)
     })
     .sort((a, b) => new Date(b.createdAt) - new Date(a.createdAt))
+    .map(story => {
+      const owner = dbState.users.find(user => user.id === story.userId)
+      return toApiStory(story, owner)
+    })
 
-  res.json({ stories })
-})
+  return res.json({ stories: visibleStories })
+}
 
-app.delete('/api/stories/:id', authRequired, (req, res) => {
-  const db = readDb()
-  const story = db.stories.find(s => s.id === req.params.id && !s.deletedAt)
-  if (!story) return res.status(404).json({ error: 'Story not found' })
-  if (story.userId !== req.userId) {
-    return res.status(403).json({ error: 'Only owner can delete story' })
+app.get('/api/stories', authRequired, getStoriesHandler)
+app.get('/api/stories/feed', authRequired, getStoriesHandler)
+
+app.delete('/api/stories/:id', authRequired, async (req, res) => {
+  if (USE_POSTGRES_RUNTIME && db) {
+    try {
+      const storyRows = await db
+        .select()
+        .from(stories)
+        .where(eq(stories.id, req.params.id))
+        .limit(1)
+      const story = storyRows[0]
+
+      if (!story) {
+        return res.status(404).json({ error: 'Story not found' })
+      }
+
+      if (req.user.id !== story.userId) {
+        return res.status(403).json({ error: 'Only the story owner can delete this story' })
+      }
+
+      await db.delete(stories).where(eq(stories.id, story.id))
+      return res.status(204).send()
+    } catch (err) {
+      console.error('Delete story DB error:', err)
+      return res.status(500).json({ error: 'Failed to delete story' })
+    }
   }
 
-  story.deletedAt = new Date().toISOString()
-  writeDb(db)
-  res.status(204).send()
+  const dbState = readDb()
+  const storyIndex = dbState.stories.findIndex(story => story.id === req.params.id)
+  if (storyIndex === -1) {
+    return res.status(404).json({ error: 'Story not found' })
+  }
+
+  const story = dbState.stories[storyIndex]
+  if (req.user.id !== story.userId) {
+    return res.status(403).json({ error: 'Only the story owner can delete this story' })
+  }
+
+  dbState.stories.splice(storyIndex, 1)
+  writeDb(dbState)
+  return res.status(204).send()
 })
 
 app.post('/api/users/:id/follow', authRequired, async (req, res) => {
@@ -1392,14 +1657,14 @@ app.post('/api/users/:id/follow', authRequired, async (req, res) => {
     }
   }
 
-  const db = readDb()
-  const target = db.users.find(u => u.id === req.params.id)
+  const dbState = readDb()
+  const target = dbState.users.find(u => u.id === req.params.id)
   if (!target) return res.status(404).json({ error: 'User not found' })
   if (target.id === req.userId) {
     return res.status(400).json({ error: 'Cannot follow yourself' })
   }
 
-  const existing = db.follows.find(
+  const existing = dbState.follows.find(
     f => f.followerId === req.userId && f.followingId === target.id
   )
   if (existing) {
@@ -1414,15 +1679,15 @@ app.post('/api/users/:id/follow', authRequired, async (req, res) => {
     status,
     createdAt: new Date().toISOString()
   }
-  db.follows.push(follow)
+  dbState.follows.push(follow)
 
-  const me = db.users.find(u => u.id === req.userId)
+  const me = dbState.users.find(u => u.id === req.userId)
   if (status === 'accepted') {
     me.followingCount += 1
     target.followerCount += 1
   }
 
-  writeDb(db)
+  writeDb(dbState)
   res.status(201).json(follow)
 })
 
@@ -1460,8 +1725,8 @@ app.get('/api/users/:id/follow-status', authRequired, async (req, res) => {
     }
   }
 
-  const db = readDb()
-  const target = db.users.find(u => u.id === req.params.id)
+  const dbState = readDb()
+  const target = dbState.users.find(u => u.id === req.params.id)
   if (!target) {
     return res.json({ status: 'none', isFollowing: false, isPending: false })
   }
@@ -1470,7 +1735,7 @@ app.get('/api/users/:id/follow-status', authRequired, async (req, res) => {
     return res.json({ status: 'self', isFollowing: false, isPending: false })
   }
 
-  const relationship = db.follows.find(
+  const relationship = dbState.follows.find(
     f => f.followerId === req.userId && f.followingId === target.id
   )
 
@@ -1507,52 +1772,103 @@ app.delete('/api/users/:id/follow', authRequired, async (req, res) => {
     }
   }
 
-  const db = readDb()
-  const index = db.follows.findIndex(
+  const dbState = readDb()
+  const index = dbState.follows.findIndex(
     follow => follow.followerId === req.userId && follow.followingId === req.params.id
   )
   if (index === -1) {
     return res.status(404).json({ error: 'Follow relationship not found' })
   }
 
-  const follow = db.follows[index]
-  const follower = db.users.find(user => user.id === follow.followerId)
-  const following = db.users.find(user => user.id === follow.followingId)
+  const follow = dbState.follows[index]
+  const follower = dbState.users.find(user => user.id === follow.followerId)
+  const following = dbState.users.find(user => user.id === follow.followingId)
   if (follow.status === 'accepted') {
     if (follower?.followingCount > 0) follower.followingCount -= 1
     if (following?.followerCount > 0) following.followerCount -= 1
   }
 
-  db.follows.splice(index, 1)
-  writeDb(db)
+  dbState.follows.splice(index, 1)
+  writeDb(dbState)
   return res.status(204).send()
 })
 
-app.delete('/api/follows/:id', authRequired, (req, res) => {
-  const db = readDb()
-  const index = db.follows.findIndex(f => f.id === req.params.id)
+app.delete('/api/follows/:id', authRequired, async (req, res) => {
+  if (USE_POSTGRES_RUNTIME && db) {
+    try {
+      const followRows = await db
+        .select()
+        .from(follows)
+        .where(eq(follows.id, req.params.id))
+        .limit(1)
+      const follow = followRows[0]
+      if (!follow) return res.status(404).json({ error: 'Follow record not found' })
+
+      if (follow.followerId !== req.userId && follow.followingId !== req.userId) {
+        return res.status(403).json({ error: 'Not allowed to remove this follow relationship' })
+      }
+
+      await db.delete(follows).where(eq(follows.id, follow.id))
+      return res.status(204).send()
+    } catch (err) {
+      console.error('Delete follow DB error:', err)
+      return res.status(500).json({ error: 'Failed to remove follow relationship' })
+    }
+  }
+
+  const dbState = readDb()
+  const index = dbState.follows.findIndex(f => f.id === req.params.id)
   if (index === -1) return res.status(404).json({ error: 'Follow record not found' })
 
-  const follow = db.follows[index]
+  const follow = dbState.follows[index]
   if (follow.followerId !== req.userId && follow.followingId !== req.userId) {
     return res.status(403).json({ error: 'Not allowed to remove this follow relationship' })
   }
 
-  const follower = db.users.find(u => u.id === follow.followerId)
-  const following = db.users.find(u => u.id === follow.followingId)
+  const follower = dbState.users.find(u => u.id === follow.followerId)
+  const following = dbState.users.find(u => u.id === follow.followingId)
   if (follow.status === 'accepted') {
     if (follower?.followingCount > 0) follower.followingCount -= 1
     if (following?.followerCount > 0) following.followerCount -= 1
   }
 
-  db.follows.splice(index, 1)
-  writeDb(db)
+  dbState.follows.splice(index, 1)
+  writeDb(dbState)
   res.status(204).send()
 })
 
-app.post('/api/follows/:id/approve', authRequired, (req, res) => {
-  const db = readDb()
-  const follow = db.follows.find(f => f.id === req.params.id)
+app.post('/api/follows/:id/approve', authRequired, async (req, res) => {
+  if (USE_POSTGRES_RUNTIME && db) {
+    try {
+      const followRows = await db
+        .select()
+        .from(follows)
+        .where(eq(follows.id, req.params.id))
+        .limit(1)
+      const follow = followRows[0]
+      if (!follow) return res.status(404).json({ error: 'Follow request not found' })
+      if (follow.followingId !== req.userId) {
+        return res.status(403).json({ error: 'Only target user can approve follow requests' })
+      }
+      if (follow.status === 'accepted') {
+        return res.status(409).json({ error: 'Follow request already approved' })
+      }
+
+      const updatedRows = await db
+        .update(follows)
+        .set({ status: 'accepted' })
+        .where(eq(follows.id, follow.id))
+        .returning()
+
+      return res.json(updatedRows[0])
+    } catch (err) {
+      console.error('Approve follow DB error:', err)
+      return res.status(500).json({ error: 'Failed to approve follow request' })
+    }
+  }
+
+  const dbState = readDb()
+  const follow = dbState.follows.find(f => f.id === req.params.id)
   if (!follow) return res.status(404).json({ error: 'Follow request not found' })
   if (follow.followingId !== req.userId) {
     return res.status(403).json({ error: 'Only target user can approve follow requests' })
@@ -1563,64 +1879,198 @@ app.post('/api/follows/:id/approve', authRequired, (req, res) => {
   }
 
   follow.status = 'accepted'
-  const follower = db.users.find(u => u.id === follow.followerId)
-  const following = db.users.find(u => u.id === follow.followingId)
+  const follower = dbState.users.find(u => u.id === follow.followerId)
+  const following = dbState.users.find(u => u.id === follow.followingId)
   if (follower) follower.followingCount += 1
   if (following) following.followerCount += 1
 
-  writeDb(db)
+  writeDb(dbState)
   res.json(follow)
 })
 
-app.post('/api/follows/:id/reject', authRequired, (req, res) => {
-  const db = readDb()
-  const index = db.follows.findIndex(f => f.id === req.params.id)
+app.post('/api/follows/:id/reject', authRequired, async (req, res) => {
+  if (USE_POSTGRES_RUNTIME && db) {
+    try {
+      const followRows = await db
+        .select()
+        .from(follows)
+        .where(eq(follows.id, req.params.id))
+        .limit(1)
+      const follow = followRows[0]
+      if (!follow) return res.status(404).json({ error: 'Follow request not found' })
+      if (follow.followingId !== req.userId) {
+        return res.status(403).json({ error: 'Only target user can reject follow requests' })
+      }
+
+      await db.delete(follows).where(eq(follows.id, follow.id))
+      return res.status(204).send()
+    } catch (err) {
+      console.error('Reject follow DB error:', err)
+      return res.status(500).json({ error: 'Failed to reject follow request' })
+    }
+  }
+
+  const dbState = readDb()
+  const index = dbState.follows.findIndex(f => f.id === req.params.id)
   if (index === -1) return res.status(404).json({ error: 'Follow request not found' })
 
-  const follow = db.follows[index]
+  const follow = dbState.follows[index]
   if (follow.followingId !== req.userId) {
     return res.status(403).json({ error: 'Only target user can reject follow requests' })
   }
 
-  db.follows.splice(index, 1)
-  writeDb(db)
+  dbState.follows.splice(index, 1)
+  writeDb(dbState)
   res.status(204).send()
 })
 
-app.get('/api/users/:id/followers', authRequired, (req, res) => {
-  const db = readDb()
-  const followers = db.follows
-    .filter(f => f.followingId === req.params.id && f.status === 'accepted')
-    .map(f => db.users.find(u => u.id === f.followerId))
-    .filter(Boolean)
-    .map(safeUser)
+app.get('/api/users/:id/followers', authRequired, async (req, res) => {
+  if (USE_POSTGRES_RUNTIME && db) {
+    try {
+      const followRows = await db
+        .select()
+        .from(follows)
+        .where(and(eq(follows.followingId, req.params.id), eq(follows.status, 'accepted')))
+        .orderBy(desc(follows.createdAt))
 
-  res.json({ followers })
+      const followerIds = followRows.map(follow => follow.followerId)
+      const followerUsers = followerIds.length > 0
+        ? await db
+          .select()
+          .from(users)
+          .where(and(inArray(users.id, followerIds), isNull(users.deletedAt)))
+        : []
+      const statsMap = await getFollowStatsMapFromDb(followerUsers.map(user => user.id))
+      const followerMap = new Map(followerUsers.map(user => [user.id, user]))
+
+      const followersPayload = followRows
+        .map(follow => serializeFollowUser(followerMap.get(follow.followerId), follow, statsMap))
+        .filter(Boolean)
+
+      return res.json({ followers: followersPayload })
+    } catch (err) {
+      console.error('Followers DB error:', err)
+      return res.status(500).json({ error: 'Failed to load followers' })
+    }
+  }
+
+  const dbState = readDb()
+  const followRows = dbState.follows
+    .filter(follow => follow.followingId === req.params.id && follow.status === 'accepted')
+    .sort((a, b) => new Date(b.createdAt) - new Date(a.createdAt))
+  const followerUsers = followRows
+    .map(follow => dbState.users.find(user => user.id === follow.followerId))
+    .filter(Boolean)
+  const statsMap = getFollowStatsMapFromJson(followerUsers.map(user => user.id), dbState)
+  const followerMap = new Map(followerUsers.map(user => [user.id, user]))
+
+  const followersPayload = followRows
+    .map(follow => serializeFollowUser(followerMap.get(follow.followerId), follow, statsMap))
+    .filter(Boolean)
+
+  res.json({ followers: followersPayload })
 })
 
-app.get('/api/users/:id/following', authRequired, (req, res) => {
-  const db = readDb()
-  const following = db.follows
-    .filter(f => f.followerId === req.params.id && f.status === 'accepted')
-    .map(f => db.users.find(u => u.id === f.followingId))
-    .filter(Boolean)
-    .map(safeUser)
+app.get('/api/users/:id/following', authRequired, async (req, res) => {
+  if (USE_POSTGRES_RUNTIME && db) {
+    try {
+      const followRows = await db
+        .select()
+        .from(follows)
+        .where(and(eq(follows.followerId, req.params.id), eq(follows.status, 'accepted')))
+        .orderBy(desc(follows.createdAt))
 
-  res.json({ following })
+      const followingIds = followRows.map(follow => follow.followingId)
+      const followingUsers = followingIds.length > 0
+        ? await db
+          .select()
+          .from(users)
+          .where(and(inArray(users.id, followingIds), isNull(users.deletedAt)))
+        : []
+      const statsMap = await getFollowStatsMapFromDb(followingUsers.map(user => user.id))
+      const followingMap = new Map(followingUsers.map(user => [user.id, user]))
+
+      const followingPayload = followRows
+        .map(follow => serializeFollowUser(followingMap.get(follow.followingId), follow, statsMap))
+        .filter(Boolean)
+
+      return res.json({ following: followingPayload })
+    } catch (err) {
+      console.error('Following DB error:', err)
+      return res.status(500).json({ error: 'Failed to load following list' })
+    }
+  }
+
+  const dbState = readDb()
+  const followRows = dbState.follows
+    .filter(follow => follow.followerId === req.params.id && follow.status === 'accepted')
+    .sort((a, b) => new Date(b.createdAt) - new Date(a.createdAt))
+  const followingUsers = followRows
+    .map(follow => dbState.users.find(user => user.id === follow.followingId))
+    .filter(Boolean)
+  const statsMap = getFollowStatsMapFromJson(followingUsers.map(user => user.id), dbState)
+  const followingMap = new Map(followingUsers.map(user => [user.id, user]))
+
+  const followingPayload = followRows
+    .map(follow => serializeFollowUser(followingMap.get(follow.followingId), follow, statsMap))
+    .filter(Boolean)
+
+  res.json({ following: followingPayload })
 })
 
-app.get('/api/users/:id/follow-requests', authRequired, (req, res) => {
+app.get('/api/users/:id/follow-requests', authRequired, async (req, res) => {
   if (req.userId !== req.params.id) {
     return res.status(403).json({ error: 'Can only view your own follow requests' })
   }
 
-  const db = readDb()
-  const requests = db.follows
-    .filter(f => f.followingId === req.params.id && f.status === 'pending')
-    .map(f => ({
-      ...f,
-      follower: safeUser(db.users.find(u => u.id === f.followerId))
+  if (USE_POSTGRES_RUNTIME && db) {
+    try {
+      const followRows = await db
+        .select()
+        .from(follows)
+        .where(and(eq(follows.followingId, req.params.id), eq(follows.status, 'pending')))
+        .orderBy(desc(follows.createdAt))
+
+      const followerIds = followRows.map(follow => follow.followerId)
+      const followerUsers = followerIds.length > 0
+        ? await db
+          .select()
+          .from(users)
+          .where(and(inArray(users.id, followerIds), isNull(users.deletedAt)))
+        : []
+      const statsMap = await getFollowStatsMapFromDb(followerUsers.map(user => user.id))
+      const followerMap = new Map(followerUsers.map(user => [user.id, user]))
+
+      const requests = followRows
+        .map(follow => ({
+          ...follow,
+          follower: toApiUserFromDb(followerMap.get(follow.followerId), statsMap.get(follow.followerId))
+        }))
+        .filter(request => request.follower)
+
+      return res.json({ requests })
+    } catch (err) {
+      console.error('Follow requests DB error:', err)
+      return res.status(500).json({ error: 'Failed to load follow requests' })
+    }
+  }
+
+  const dbState = readDb()
+  const followRows = dbState.follows
+    .filter(follow => follow.followingId === req.params.id && follow.status === 'pending')
+    .sort((a, b) => new Date(b.createdAt) - new Date(a.createdAt))
+  const followerUsers = followRows
+    .map(follow => dbState.users.find(user => user.id === follow.followerId))
+    .filter(Boolean)
+  const statsMap = getFollowStatsMapFromJson(followerUsers.map(user => user.id), dbState)
+  const followerMap = new Map(followerUsers.map(user => [user.id, user]))
+
+  const requests = followRows
+    .map(follow => ({
+      ...follow,
+      follower: toApiUserFromDb(followerMap.get(follow.followerId), statsMap.get(follow.followerId))
     }))
+    .filter(request => request.follower)
 
   res.json({ requests })
 })
@@ -1640,20 +2090,21 @@ app.get('/api/users/search', authRequired, async (req, res) => {
         ))
         .limit(20)
 
-      return res.json({ users: rows.map(toApiUserFromDb) })
+      const statsMap = await getFollowStatsMapFromDb(rows.map(user => user.id))
+      return res.json({ users: attachFollowStats(rows, statsMap) })
     } catch (err) {
       console.error('User search DB error:', err)
-      return res.status(500).json({ error: 'Failed to search users' })
+      return sendDatabaseError(res, 'Failed to search users', err)
     }
   }
 
-  const db = readDb()
-  const users = db.users
+  const dbState = readDb()
+  const matchingUsers = dbState.users
     .filter(u => u.username.includes(q) || u.fullName.toLowerCase().includes(q))
     .slice(0, 20)
-    .map(safeUser)
+  const statsMap = getFollowStatsMapFromJson(matchingUsers.map(user => user.id), dbState)
 
-  res.json({ users })
+  res.json({ users: attachFollowStats(matchingUsers, statsMap) })
 })
 
 app.get('/api/users/:username', authRequired, async (req, res) => {
@@ -1706,28 +2157,30 @@ app.get('/api/users/:username', authRequired, async (req, res) => {
       }
 
       const payloadPosts = postRows.map(post => toApiPostFromDb(post, imagesByPost.get(post.id) || []))
-      return res.json({ user: toApiUserFromDb(user), posts: payloadPosts })
+      const statsMap = await getFollowStatsMapFromDb([user.id])
+      return res.json({ user: toApiUserFromDb(user, statsMap.get(user.id)), posts: payloadPosts })
     } catch (err) {
       console.error('User profile DB error:', err)
-      return res.status(500).json({ error: 'Failed to load user profile' })
+      return sendDatabaseError(res, 'Failed to load user profile', err)
     }
   }
 
-  const db = readDb()
+  const dbState = readDb()
   const username = String(req.params.username).toLowerCase().replace(/^@/, '')
-  const user = db.users.find(u => u.username === username)
+  const user = dbState.users.find(u => u.username === username)
   if (!user) return res.status(404).json({ error: 'User not found' })
 
-  const canView = canViewUserContent(req.userId, user, db)
+  const canView = canViewUserContent(req.userId, user, dbState)
   if (!canView) {
     return res.status(403).json({ error: 'This account is private' })
   }
 
-  const posts = db.posts
+  const userPosts = dbState.posts
     .filter(p => p.userId === user.id && !p.deletedAt)
     .sort((a, b) => new Date(b.createdAt) - new Date(a.createdAt))
 
-  res.json({ user: safeUser(user), posts })
+  const statsMap = getFollowStatsMapFromJson([user.id], dbState)
+  res.json({ user: toApiUserFromDb(user, statsMap.get(user.id)), posts: userPosts })
 })
 
 app.put('/api/users/:id', authRequired, async (req, res) => {
@@ -1744,40 +2197,6 @@ app.put('/api/users/:id', authRequired, async (req, res) => {
         .limit(1)
       const user = rows[0]
       if (!user) return res.status(404).json({ error: 'User not found' })
-
-      if (Object.prototype.hasOwnProperty.call(req.body, 'bio')) {
-        const nextBio = String(req.body.bio || '').trim()
-        const normalizedBioValue = normalizeBio(nextBio)
-        if (normalizedBioValue) {
-          const duplicate = await db
-            .select()
-            .from(users)
-            .where(and(isNull(users.deletedAt), eq(users.bio, nextBio), sql`${users.id} <> ${user.id}`))
-            .limit(1)
-          if (duplicate.length > 0) {
-            return res.status(409).json({ error: 'Bio already exists. Please use a different bio.' })
-          }
-        }
-      }
-
-      if (Object.prototype.hasOwnProperty.call(req.body, 'website')) {
-        const nextWebsite = String(req.body.website || '').trim()
-        const normalizedWebsiteValue = normalizeWebsite(nextWebsite)
-        if (normalizedWebsiteValue) {
-          const duplicate = await db
-            .select()
-            .from(users)
-            .where(and(
-              isNull(users.deletedAt),
-              sql`lower(${users.website}) = ${normalizedWebsiteValue}`,
-              sql`${users.id} <> ${user.id}`
-            ))
-            .limit(1)
-          if (duplicate.length > 0) {
-            return res.status(409).json({ error: 'Website already exists. Please use a different website.' })
-          }
-        }
-      }
 
       const patch = { updatedAt: new Date() }
       if (Object.prototype.hasOwnProperty.call(req.body, 'fullName')) patch.fullName = String(req.body.fullName || '')
@@ -1799,33 +2218,12 @@ app.put('/api/users/:id', authRequired, async (req, res) => {
     }
   }
 
-  const db = readDb()
-  const user = db.users.find(u => u.id === req.params.id)
+  const dbState = readDb()
+  const user = dbState.users.find(u => u.id === req.params.id)
   if (!user) return res.status(404).json({ error: 'User not found' })
 
-  if (Object.prototype.hasOwnProperty.call(req.body, 'bio')) {
-    const nextBio = String(req.body.bio || '').trim()
-    const normalizedBioValue = normalizeBio(nextBio)
-    if (
-      normalizedBioValue &&
-      db.users.some(existing => existing.id !== user.id && normalizeBio(existing?.bio) === normalizedBioValue)
-    ) {
-      return res.status(409).json({ error: 'Bio already exists. Please use a different bio.' })
-    }
-    user.bio = nextBio
-  }
-
-  if (Object.prototype.hasOwnProperty.call(req.body, 'website')) {
-    const nextWebsite = String(req.body.website || '').trim()
-    const normalizedWebsiteValue = normalizeWebsite(nextWebsite)
-    if (
-      normalizedWebsiteValue &&
-      db.users.some(existing => existing.id !== user.id && normalizeWebsite(existing?.website) === normalizedWebsiteValue)
-    ) {
-      return res.status(409).json({ error: 'Website already exists. Please use a different website.' })
-    }
-    user.website = nextWebsite
-  }
+  if (Object.prototype.hasOwnProperty.call(req.body, 'bio')) user.bio = String(req.body.bio || '').trim()
+  if (Object.prototype.hasOwnProperty.call(req.body, 'website')) user.website = String(req.body.website || '').trim()
 
   const allowedFields = ['fullName', 'profilePicture', 'isPrivate']
   for (const field of allowedFields) {
@@ -1835,11 +2233,12 @@ app.put('/api/users/:id', authRequired, async (req, res) => {
   }
   user.updatedAt = new Date().toISOString()
 
-  writeDb(db)
+  writeDb(dbState)
   res.json(safeUser(user))
 })
 
-app.use((err, _req, res, _next) => {
+app.use((err, _req, res, next) => {
+  void next
   console.error('Unhandled API error:', err)
   if (res.headersSent) return
   res.status(err?.status || 500).json({ error: err?.message || 'Internal server error' })
@@ -1850,8 +2249,8 @@ app.listen(PORT, () => {
   if (USE_POSTGRES_RUNTIME) {
     console.log('Runtime storage: Neon PostgreSQL via Drizzle ORM')
   } else if (hasDatabaseUrl) {
-    console.log('Runtime storage: JSON file (Neon configured but USE_POSTGRES_RUNTIME is false)')
+    console.log('Runtime storage: JSON file (Neon configured but explicitly disabled)')
   } else {
-    console.log('Runtime storage: JSON file (set DATABASE_URL and USE_POSTGRES_RUNTIME=true to enable Neon runtime)')
+    console.log('Runtime storage: JSON file (configure DATABASE_URL to enable Neon runtime)')
   }
 })

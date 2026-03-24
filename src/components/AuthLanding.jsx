@@ -5,7 +5,7 @@ import { useAuth } from '../context/AuthContext'
 import '../styles/AuthLanding.css'
 
 export default function AuthLanding({ initialMode = 'login' }) {
-  const { login, signup, isLoading, error, clearError } = useAuth()
+  const { login, signup, logout, currentUser, isAuthenticated, isLoading, error, clearError } = useAuth()
   const navigate = useNavigate()
   const [mode, setMode] = useState(initialMode)
   const [loginData, setLoginData] = useState({ email: '', password: '' })
@@ -107,6 +107,12 @@ export default function AuthLanding({ initialMode = 'login' }) {
     }
   }
 
+  const handleSwitchAccount = () => {
+    logout()
+    setLocalError('')
+    clearError()
+  }
+
   return (
     <div className="auth-landing">
       <section className="auth-hero" aria-hidden="true">
@@ -123,7 +129,18 @@ export default function AuthLanding({ initialMode = 'login' }) {
         <div className="auth-panel-card">
           <BrandLogo compact />
 
-          {mode === 'login' ? (
+          {isAuthenticated ? (
+            <div className="auth-panel-form">
+              <h2>Signed in as @{currentUser?.username || 'user'}</h2>
+              <p>Continue with this account or sign in with a different one.</p>
+              <button type="button" onClick={() => navigate('/home', { replace: true })}>
+                Continue to home
+              </button>
+              <button type="button" onClick={handleSwitchAccount}>
+                Use another account
+              </button>
+            </div>
+          ) : mode === 'login' ? (
             <form className="auth-panel-form" onSubmit={submitLogin}>
               <h2>Log in</h2>
               <input

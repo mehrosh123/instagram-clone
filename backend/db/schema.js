@@ -97,11 +97,8 @@ export const stories = pgTable('stories', {
   id: uuid('id').defaultRandom().primaryKey(),
   userId: uuid('user_id').notNull().references(() => users.id, { onDelete: 'cascade' }),
   imageUrl: varchar('image_url', { length: 512 }).notNull(),
-  caption: text('caption').default('').notNull(),
-  createdAt: timestamp('created_at', { withTimezone: false }).defaultNow().notNull(),
-  expiresAt: timestamp('expires_at', { withTimezone: false }).notNull(),
-  deletedAt: timestamp('deleted_at', { withTimezone: false })
+  createdAt: timestamp('created_at', { withTimezone: false }).defaultNow().notNull()
 }, (table) => ({
-  storyUserCreatedIdx: index('idx_stories_user_created').on(table.userId, table.createdAt),
-  storyExpiresIdx: index('idx_stories_expires_at').on(table.expiresAt)
+  storyCreatedIdx: index('idx_stories_created_at').on(table.createdAt),
+  storyUserCreatedIdx: index('idx_stories_user_created').on(table.userId, table.createdAt)
 }))

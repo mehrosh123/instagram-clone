@@ -1,7 +1,13 @@
-const TOKEN_KEY = 'auth_token'
+const TOKEN_KEYS = ['auth_token', 'token']
 
 export function getAuthToken() {
-  return localStorage.getItem(TOKEN_KEY)
+  for (const key of TOKEN_KEYS) {
+    const token = localStorage.getItem(key)
+    if (token) {
+      return token
+    }
+  }
+  return null
 }
 
 export async function apiFetch(url, options = {}) {
@@ -17,6 +23,7 @@ export async function apiFetch(url, options = {}) {
 
   const response = await fetch(url, {
     ...options,
+    cache: 'no-store',
     headers
   })
 

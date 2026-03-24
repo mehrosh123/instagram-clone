@@ -2,38 +2,13 @@ import { useEffect, useState } from 'react'
 import { apiFetch } from '../api/client'
 import '../styles/Followers.css'
 
-/**
- * THEORY: Followers & Follow System
- * ==================================
- * 
- * Database Schema:
- * 
- * follows table (Many-to-Many relationship):
- * - id: primary key
- * - follower_id: foreign key (users) - who is following
- * - following_id: foreign key (users) - who is being followed
- * - created_at: timestamp
- * - status: 'accepted' | 'pending' (if private account)
- * - UNIQUE CONSTRAINT (follower_id, following_id) - prevent duplicates
- * 
- * Indexes:
- * - INDEX on (follower_id) for "following" feed queries
- * - INDEX on (following_id) for "followers" list
- * - Compound INDEX on (following_id, status) for feed queries on private accounts
- * 
- * Private Account Logic:
- * When user sets account to private:
- * 1. New follow requests get status='pending'
- * 2. Only show user's posts to accepted followers
- * 3. User must approve follow requests
- * 4. Can see pending requests and accept/reject them
- * 
- * Query Example (Show feed only from accepted followers):
- * SELECT posts.* FROM posts
- * JOIN follows ON posts.user_id = follows.following_id
- * WHERE follows.follower_id = ? AND follows.status = 'accepted'
- * ORDER BY posts.created_at DESC
- */
+function Avatar({ src, alt, className }) {
+  if (src) {
+    return <img src={src} alt={alt} className={className} />
+  }
+
+  return <span className={className}>👤</span>
+}
 
 export default function FollowButton({ userId, isPrivate = false }) {
   const [isFollowing, setIsFollowing] = useState(false)
@@ -51,6 +26,7 @@ export default function FollowButton({ userId, isPrivate = false }) {
         setIsPending(false)
         return
       }
+
       try {
         const status = await apiFetch(`/api/users/${encodeURIComponent(normalizedId)}/follow-status`)
         if (!active) return
@@ -70,17 +46,6 @@ export default function FollowButton({ userId, isPrivate = false }) {
     }
   }, [userId])
 
-  /**
-   * THEORY: Toggle Follow State
-   * ===========================
-   * Optimistic update: Update UI immediately, then call API
-   * If API fails, rollback the UI state
-   * 
-   * For private accounts:
-   * - First click: pending (user sent request)
-   * - Private account owner: sees in "follow requests"
-   * - Second click: can unfollow (cancels request)
-   */
   const handleFollowClick = async () => {
     if (isLoading) return
 
@@ -118,18 +83,18 @@ export default function FollowButton({ userId, isPrivate = false }) {
     }
   }
 
-  const buttonText = isPending 
-    ? 'Pending' 
-    : isFollowing 
-      ? 'Following' 
+  const buttonText = isPending
+    ? 'Pending'
+    : isFollowing
+      ? 'Following'
       : 'Follow'
 
   return (
-    <button 
+    <button
       className={`follow-btn ${isFollowing ? 'following' : ''} ${isPending ? 'pending' : ''}`}
       onClick={handleFollowClick}
       disabled={isLoading}
-      title={`${buttonText}`}
+      title={buttonText}
     >
       {isLoading ? '...' : buttonText}
       {error && <span className="error-tooltip">{error}</span>}
@@ -137,42 +102,32 @@ export default function FollowButton({ userId, isPrivate = false }) {
   )
 }
 
-/**
- * THEORY: Followers List Component
- * ================================
- * Shows users who follow the current user
- * Allows managing follower relationships
- */
-export function FollowersList({ currentUserId, followers, onRemove, onOpenProfile }) {
+export function FollowersList({ followers, onRemove, onOpenProfile }) {
   return (
     <div className="followers-list">
       <div className="followers-header">
         <h3>{followers.length} Followers</h3>
       </div>
-      
+
       <div className="followers-container">
         {followers.map(follower => (
           <div key={follower.id} className="follower-card">
             <div className="follower-info">
-              <img 
-                src={follower.profilePicture} 
-                alt={follower.username}
-                className="follower-avatar"
-              />
+              <Avatar src={follower.profilePicture} alt={follower.username} className="follower-avatar" />
               <div className="follower-details">
                 <button type="button" className="follower-username" onClick={() => onOpenProfile?.(follower.username)}>{follower.username}</button>
                 <button type="button" className="follower-name" onClick={() => onOpenProfile?.(follower.username)}>{follower.fullName}</button>
               </div>
             </div>
-            
+
             <div className="follower-actions">
-              <button className="msg-btn" title="Message">💬</button>
-              <button 
+              <button className="msg-btn" title="Message">Chat</button>
+              <button
                 className="remove-btn"
-                onClick={() => onRemove(follower.id)}
+                onClick={() => onRemove(follower.followId || follower.id)}
                 title="Remove follower"
               >
-                ✕
+                Remove
               </button>
             </div>
           </div>
@@ -182,34 +137,25 @@ export function FollowersList({ currentUserId, followers, onRemove, onOpenProfil
   )
 }
 
-/**
- * THEORY: Following List Component
- * ================================
- * Shows users that current user is following
- */
 export function FollowingList({ following, onUnfollow, onOpenProfile }) {
   return (
     <div className="following-list">
       <div className="following-header">
         <h3>{following.length} Following</h3>
       </div>
-      
+
       <div className="following-container">
         {following.map(user => (
           <div key={user.id} className="following-card">
             <div className="following-info">
-              <img 
-                src={user.profilePicture} 
-                alt={user.username}
-                className="following-avatar"
-              />
+              <Avatar src={user.profilePicture} alt={user.username} className="following-avatar" />
               <div className="following-details">
                 <button type="button" className="following-username" onClick={() => onOpenProfile?.(user.username)}>{user.username}</button>
                 <button type="button" className="following-name" onClick={() => onOpenProfile?.(user.username)}>{user.fullName}</button>
               </div>
             </div>
-            
-            <button 
+
+            <button
               className="unfollow-btn"
               onClick={() => onUnfollow(user.id)}
             >
@@ -222,12 +168,6 @@ export function FollowingList({ following, onUnfollow, onOpenProfile }) {
   )
 }
 
-/**
- * THEORY: Follow Requests Component
- * ==================================
- * For private accounts - shows pending follow requests
- * User can approve or reject
- */
 export function FollowRequests({ requests, onApprove, onReject }) {
   if (requests.length === 0) {
     return (
@@ -242,38 +182,37 @@ export function FollowRequests({ requests, onApprove, onReject }) {
       <div className="requests-header">
         <h3>Follow Requests</h3>
       </div>
-      
+
       <div className="requests-list">
-        {requests.map(request => (
-          <div key={request.id} className="request-card">
-            <div className="request-info">
-              <img 
-                src={request.profilePicture} 
-                alt={request.username}
-                className="request-avatar"
-              />
-              <div className="request-details">
-                <p className="request-username">{request.username}</p>
-                <p className="request-name">{request.fullName}</p>
+        {requests.map(request => {
+          const follower = request.follower || request
+          return (
+            <div key={request.id} className="request-card">
+              <div className="request-info">
+                <Avatar src={follower.profilePicture} alt={follower.username} className="request-avatar" />
+                <div className="request-details">
+                  <p className="request-username">{follower.username}</p>
+                  <p className="request-name">{follower.fullName}</p>
+                </div>
+              </div>
+
+              <div className="request-actions">
+                <button
+                  className="approve-btn"
+                  onClick={() => onApprove(request.id)}
+                >
+                  Approve
+                </button>
+                <button
+                  className="reject-btn"
+                  onClick={() => onReject(request.id)}
+                >
+                  Reject
+                </button>
               </div>
             </div>
-            
-            <div className="request-actions">
-              <button 
-                className="approve-btn"
-                onClick={() => onApprove(request.id)}
-              >
-                ✓
-              </button>
-              <button 
-                className="reject-btn"
-                onClick={() => onReject(request.id)}
-              >
-                ✕
-              </button>
-            </div>
-          </div>
-        ))}
+          )
+        })}
       </div>
     </div>
   )

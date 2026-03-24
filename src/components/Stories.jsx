@@ -1,190 +1,243 @@
-import { useState, useEffect } from 'react'
+import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
 import { useAuth } from '../context/AuthContext'
 import { apiFetch } from '../api/client'
+import { uploadImageToCloudinary } from '../utils/cloudinary'
 import '../styles/Stories.css'
 
-/**
- * THEORY: Stories Feature (24-hour Visibility)
- * =============================================
- * 
- * Database Schema for Stories:
- * 
- * stories table:
- * - id: primary key (UUID)
- * - user_id: foreign key (users)
- * - image_url: story image path
- * - caption: optional caption text
- * - created_at: timestamp (ISO 8601)
- * - expires_at: timestamp (created_at + 24 hours)
- * 
- * Implementation Details:
- * 1. When story is uploaded, set expires_at = NOW() + INTERVAL '24 hours'
- * 2. Query only stories where expires_at > NOW()
- * 3. Background jobs periodically delete expired stories
- * 4. Client-side countdown shows time remaining
- * 
- * Indexes:
- * - INDEX on (user_id, created_at DESC) for user's stories
- * - INDEX on (expires_at) for cleanup queries
- * - Compound INDEX for feed queries
- */
+const STORY_TTL_MS = 24 * 60 * 60 * 1000
+
+function isValidHttpUrl(value) {
+  try {
+    const parsedUrl = new URL(String(value).trim())
+    return parsedUrl.protocol === 'http:' || parsedUrl.protocol === 'https:'
+  } catch {
+    return false
+  }
+}
+
+function getInitials(label = '') {
+  const parts = String(label).trim().split(/\s+/).filter(Boolean)
+  if (parts.length === 0) return 'U'
+  return parts.slice(0, 2).map(part => part[0]).join('').toUpperCase()
+}
+
+function getStoryAuthor(story, currentUser) {
+  if (story.userId === currentUser?.id) {
+    return currentUser?.fullName || currentUser?.username || 'You'
+  }
+
+  return story.user?.fullName || story.user?.username || 'User'
+}
+
+function mapStory(story, currentUser) {
+  const createdAt = new Date(story.createdAt)
+  const author = getStoryAuthor(story, currentUser)
+
+  return {
+    ...story,
+    image: story.imageUrl,
+    author,
+    avatarLabel: getInitials(author),
+    createdAt,
+    expiresAt: new Date(createdAt.getTime() + STORY_TTL_MS),
+    isMine: story.userId === currentUser?.id
+  }
+}
+
+function getTimeAgo(date) {
+  const diff = Date.now() - date.getTime()
+  const seconds = Math.floor(diff / 1000)
+  const minutes = Math.floor(seconds / 60)
+  const hours = Math.floor(minutes / 60)
+
+  if (seconds < 60) return 'just now'
+  if (minutes < 60) return `${minutes}m`
+  if (hours < 24) return `${hours}h`
+  return '24h+'
+}
+
+function getTimeRemaining(expiresAt, nowMs) {
+  const diff = expiresAt.getTime() - nowMs
+
+  if (diff <= 0) return 'Expired'
+
+  const hours = Math.floor(diff / (1000 * 60 * 60))
+  const minutes = Math.floor((diff % (1000 * 60 * 60)) / (1000 * 60))
+  return `${hours}h ${minutes}m`
+}
 
 export default function Stories() {
   const { currentUser } = useAuth()
+  const fileInputRef = useRef(null)
   const [stories, setStories] = useState([])
+  const [storyUrl, setStoryUrl] = useState('')
+  const [selectedFile, setSelectedFile] = useState(null)
   const [loading, setLoading] = useState(false)
+  const [isSubmitting, setIsSubmitting] = useState(false)
   const [error, setError] = useState('')
+  const [selectedStoryId, setSelectedStoryId] = useState(null)
+  const [nowMs, setNowMs] = useState(Date.now())
 
-  const [selectedStory, setSelectedStory] = useState(null)
-  const [timeRemaining, setTimeRemaining] = useState({})
-
-  const loadStories = async () => {
+  const loadStories = useCallback(async () => {
     setLoading(true)
     setError('')
+
     try {
-      const data = await apiFetch('/api/stories/feed')
-      const mapped = (data.stories || []).map(story => ({
-        ...story,
-        image: story.imageUrl,
-        author: story.userId === currentUser?.id ? currentUser.fullName : 'User',
-        avatar: story.userId === currentUser?.id
-          ? (currentUser.profilePicture || currentUser.initials || '👤')
-          : '👤',
-        createdAt: new Date(story.createdAt),
-        expiresAt: new Date(story.expiresAt),
-        viewed: false
-      }))
-      setStories(mapped)
+      const data = await apiFetch('/api/stories')
+      const mappedStories = (data.stories || []).map(story => mapStory(story, currentUser))
+      setStories(mappedStories)
     } catch (err) {
       setError(err.message)
       setStories([])
     } finally {
       setLoading(false)
     }
-  }
+  }, [currentUser])
 
   useEffect(() => {
     loadStories()
-  }, [currentUser?.id])
+  }, [loadStories])
 
-  /**
-   * THEORY: useEffect for Side Effects
-   * ===================================
-   * Side effects = operations that affect things outside the component
-   * Examples:
-   * - API calls (fetching stories from server)
-   * - Setting up timers/intervals (countdown timer)
-   * - Updating document title
-   * - Setting up subscriptions
-   * 
-   * Setup: useEffect(() => { ... }, [dependencies])
-   * Cleanup: return () => { ... } (runs when component unmounts)
-   */
-
-  // Calculate time remaining for each story
   useEffect(() => {
-    const calculateTimeRemaining = () => {
-      const now = new Date()
-      const remaining = {}
+    const timer = setInterval(() => {
+      setNowMs(Date.now())
+    }, 60000)
 
-      stories.forEach(story => {
-        const diff = story.expiresAt - now
-        if (diff <= 0) {
-          remaining[story.id] = 'Expired'
-        } else {
-          const hours = Math.floor(diff / (1000 * 60 * 60))
-          const minutes = Math.floor((diff % (1000 * 60 * 60)) / (1000 * 60))
-          remaining[story.id] = `${hours}h ${minutes}m`
-        }
-      })
+    return () => clearInterval(timer)
+  }, [])
 
-      setTimeRemaining(remaining)
+  const visibleStories = useMemo(() => {
+    return stories.filter(story => story.expiresAt.getTime() > nowMs)
+  }, [stories, nowMs])
+
+  const selectedStory = useMemo(() => {
+    return visibleStories.find(story => story.id === selectedStoryId) || null
+  }, [visibleStories, selectedStoryId])
+
+  useEffect(() => {
+    if (selectedStoryId && !selectedStory) {
+      setSelectedStoryId(null)
     }
+  }, [selectedStory, selectedStoryId])
 
-    calculateTimeRemaining()
-    // Update every minute
-    const interval = setInterval(calculateTimeRemaining, 60000)
+  const handleDeleteStory = useCallback(async (storyId) => {
+    setError('')
 
-    return () => clearInterval(interval)
-  }, [stories])
-
-  /**
-   * THEORY: Story Deletion
-   * ======================
-   * User can delete own stories at any time
-   * This triggers:
-   * 1. DELETE story from database
-   * 2. Remove image file from storage
-   * 3. Update client state immediately (optimistic update)
-   * 4. If API fails, rollback the UI change
-   */
-  const handleDeleteStory = async (storyId) => {
-    setStories(prev => prev.filter(s => s.id !== storyId))
+    setStories(prevStories => prevStories.filter(story => story.id !== storyId))
+    if (selectedStoryId === storyId) {
+      setSelectedStoryId(null)
+    }
 
     try {
       await apiFetch(`/api/stories/${storyId}`, { method: 'DELETE' })
     } catch (err) {
-      console.error('Failed to delete story:', err)
-      loadStories()
+      setError(err.message)
+      await loadStories()
     }
-  }
+  }, [loadStories, selectedStoryId])
 
-  const handleAddStory = async (e) => {
-    if (e) e.preventDefault()
+  const resetStoryForm = useCallback(() => {
+    setStoryUrl('')
+    setSelectedFile(null)
+    if (fileInputRef.current) {
+      fileInputRef.current.value = ''
+    }
+  }, [])
 
-    const imageUrl = window.prompt('Paste story image URL')
-    if (!imageUrl || !imageUrl.trim()) return
+  const handleChooseFile = useCallback(() => {
+    fileInputRef.current?.click()
+  }, [])
 
-    const caption = window.prompt('Add a caption (optional)') || ''
+  const handleFileChange = useCallback((event) => {
+    const nextFile = event.target.files?.[0] || null
+    setSelectedFile(nextFile)
+    setError('')
+  }, [])
+
+  const handleAddStory = useCallback(async (event) => {
+    event.preventDefault()
+
+    const trimmedUrl = storyUrl.trim()
+    const hasUrl = trimmedUrl.length > 0
+    const hasFile = !!selectedFile
+
+    if (!hasUrl && !hasFile) {
+      setError('Choose a file or paste an image URL.')
+      return
+    }
+
+    if (hasUrl && !isValidHttpUrl(trimmedUrl)) {
+      setError('Please enter a valid http(s) image URL.')
+      return
+    }
+
+    setIsSubmitting(true)
+    setError('')
 
     try {
+      const finalImageUrl = hasFile
+        ? await uploadImageToCloudinary(selectedFile)
+        : trimmedUrl
+
       await apiFetch('/api/stories', {
         method: 'POST',
-        body: JSON.stringify({ imageUrl: imageUrl.trim(), caption: caption.trim() })
+        body: JSON.stringify({
+          imageUrl: finalImageUrl,
+          userId: currentUser?.id
+        })
       })
+
+      resetStoryForm()
       await loadStories()
     } catch (err) {
       setError(err.message)
+    } finally {
+      setIsSubmitting(false)
     }
-  }
+  }, [currentUser?.id, loadStories, resetStoryForm, selectedFile, storyUrl])
+
+  const selectedStoryIndex = selectedStory
+    ? visibleStories.findIndex(story => story.id === selectedStory.id)
+    : -1
 
   return (
     <div className="stories-container">
       {error && <p className="story-error">{error}</p>}
-      {loading && <p className="story-loading">Loading stories...</p>}
+      {(loading || isSubmitting) && (
+        <p className="story-loading">
+          {isSubmitting ? 'Saving story...' : 'Loading stories...'}
+        </p>
+      )}
 
       {selectedStory ? (
-        /* Story Viewer */
         <div className="story-viewer">
-          <button 
+          <button
+            type="button"
             className="story-close"
-            onClick={() => setSelectedStory(null)}
+            onClick={() => setSelectedStoryId(null)}
           >
-            ✕
+            x
           </button>
 
           <div className="story-content">
             <div className="story-header-viewer">
               <div className="story-info">
-                <span className="avatar">{selectedStory.avatar}</span>
+                <span className="avatar">{selectedStory.avatarLabel}</span>
                 <div>
                   <p className="author-name">{selectedStory.author}</p>
-                  <p className="time-ago">
-                    {getTimeAgo(selectedStory.createdAt)} ago
-                  </p>
+                  <p className="time-ago">{getTimeAgo(selectedStory.createdAt)} ago</p>
                 </div>
               </div>
+
               <div className="story-actions">
                 <span className="expiration">
-                  Expires in {timeRemaining[selectedStory.id]}
+                  Expires in {getTimeRemaining(selectedStory.expiresAt, nowMs)}
                 </span>
-                {selectedStory.userId === currentUser?.id && (
+                {selectedStory.isMine && (
                   <button
+                    type="button"
                     className="delete-story-btn"
-                    onClick={() => {
-                      handleDeleteStory(selectedStory.id)
-                      setSelectedStory(null)
-                    }}
+                    onClick={() => handleDeleteStory(selectedStory.id)}
                   >
                     Delete
                   </button>
@@ -192,84 +245,125 @@ export default function Stories() {
               </div>
             </div>
 
-            <img 
-              src={selectedStory.image} 
-              alt="Story" 
+            <img
+              src={selectedStory.image}
+              alt={selectedStory.author}
               className="story-image"
             />
 
-            {/* Navigation */}
-            <button 
+            <button
+              type="button"
               className="story-nav prev"
               onClick={() => {
-                const currentIndex = stories.findIndex(s => s.id === selectedStory.id)
-                if (currentIndex > 0) {
-                  setSelectedStory(stories[currentIndex - 1])
+                if (selectedStoryIndex > 0) {
+                  setSelectedStoryId(visibleStories[selectedStoryIndex - 1].id)
                 }
               }}
-              disabled={stories.findIndex(s => s.id === selectedStory.id) === 0}
+              disabled={selectedStoryIndex <= 0}
             >
-              ❮
+              {'<'}
             </button>
-            <button 
+
+            <button
+              type="button"
               className="story-nav next"
               onClick={() => {
-                const currentIndex = stories.findIndex(s => s.id === selectedStory.id)
-                if (currentIndex < stories.length - 1) {
-                  setSelectedStory(stories[currentIndex + 1])
+                if (selectedStoryIndex < visibleStories.length - 1) {
+                  setSelectedStoryId(visibleStories[selectedStoryIndex + 1].id)
                 }
               }}
-              disabled={stories.findIndex(s => s.id === selectedStory.id) === stories.length - 1}
+              disabled={selectedStoryIndex === -1 || selectedStoryIndex >= visibleStories.length - 1}
             >
-              ❯
+              {'>'}
             </button>
           </div>
         </div>
       ) : (
-        /* Stories List */
-        <div className="stories-list">
-          <button className="story-add" onClick={handleAddStory}>
-            <span>+</span>
-            <small>Your story</small>
-          </button>
-          {stories.map(story => (
-            <div 
-              key={story.id}
-              className="story-card"
-              onClick={() => setSelectedStory(story)}
-            >
-              <div className="story-ring">
-                <img 
-                  src={story.image} 
-                  alt={story.author}
-                  className={`story-thumbnail ${story.viewed ? 'viewed' : ''}`}
-                />
-              </div>
-              <p className="story-name">{story.author}</p>
+        <>
+          <form
+            onSubmit={handleAddStory}
+            className="mb-4 rounded-3xl border border-slate-200 bg-white p-4 shadow-sm"
+          >
+            <div className="flex flex-col gap-3 md:flex-row md:items-center">
+              <button
+                type="button"
+                onClick={handleChooseFile}
+                disabled={isSubmitting}
+                className="inline-flex h-11 items-center justify-center rounded-full border border-slate-300 px-4 text-sm font-medium text-slate-700 transition hover:bg-slate-50 disabled:cursor-not-allowed disabled:opacity-60"
+              >
+                Choose File
+              </button>
+
+              <input
+                ref={fileInputRef}
+                type="file"
+                accept="image/*"
+                onChange={handleFileChange}
+                className="hidden"
+              />
+
+              <span className="min-h-6 text-sm text-slate-500">
+                {selectedFile ? selectedFile.name : 'No file selected'}
+              </span>
             </div>
-          ))}
-        </div>
+
+            <div className="mt-3 flex flex-col gap-3 md:flex-row">
+              <input
+                type="url"
+                value={storyUrl}
+                onChange={(event) => {
+                  setStoryUrl(event.target.value)
+                  if (error) {
+                    setError('')
+                  }
+                }}
+                placeholder="Paste Image URL"
+                disabled={isSubmitting}
+                className="h-11 flex-1 rounded-full border border-slate-300 px-4 text-sm text-slate-800 outline-none transition placeholder:text-slate-400 focus:border-sky-500 disabled:cursor-not-allowed disabled:opacity-60"
+              />
+
+              <button
+                type="submit"
+                disabled={isSubmitting}
+                className="inline-flex h-11 items-center justify-center rounded-full bg-sky-500 px-5 text-sm font-semibold text-white transition hover:bg-sky-600 disabled:cursor-not-allowed disabled:bg-sky-300"
+              >
+                {isSubmitting ? 'Adding Story...' : 'Add Story'}
+              </button>
+            </div>
+
+            <p className="mt-2 text-xs text-slate-500">
+              Paste an image URL or choose a file. If both are provided, the uploaded file is used.
+            </p>
+          </form>
+
+          <div className="stories-list">
+            {visibleStories.map(story => (
+              <div
+                key={story.id}
+                className="story-card"
+                onClick={() => setSelectedStoryId(story.id)}
+                onKeyDown={(event) => {
+                  if (event.key === 'Enter' || event.key === ' ') {
+                    event.preventDefault()
+                    setSelectedStoryId(story.id)
+                  }
+                }}
+                role="button"
+                tabIndex={0}
+              >
+                <div className="story-ring">
+                  <img
+                    src={story.image}
+                    alt={story.author}
+                    className="story-thumbnail"
+                  />
+                </div>
+                <p className="story-name">{story.author}</p>
+              </div>
+            ))}
+          </div>
+        </>
       )}
     </div>
   )
-}
-
-/**
- * THEORY: Utility Function
- * ========================
- * Pure function that takes time and returns relative string
- * Examples: "2 hours", "30 minutes", "just now"
- */
-function getTimeAgo(date) {
-  const now = new Date()
-  const diff = now - date
-  const seconds = Math.floor(diff / 1000)
-  const minutes = Math.floor(seconds / 60)
-  const hours = Math.floor(minutes / 60)
-  const days = Math.floor(hours / 24)
-
-  if (seconds < 60) return 'just now'
-  if (minutes < 60) return `${minutes}m`
-  if (hours < 24) return `${hours}h`
-  return `${days}d`
 }

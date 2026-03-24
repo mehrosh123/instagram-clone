@@ -113,6 +113,7 @@ export function AuthProvider({ children }) {
     try {
       const response = await fetch('/api/auth/signup', {
         method: 'POST',
+        cache: 'no-store',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({
           email,
@@ -160,6 +161,7 @@ export function AuthProvider({ children }) {
     try {
       const response = await fetch('/api/auth/login', {
         method: 'POST',
+        cache: 'no-store',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ email, password })
       })
@@ -224,6 +226,7 @@ export function AuthProvider({ children }) {
 
     try {
       const response = await fetch('/api/auth/me', {
+        cache: 'no-store',
         headers: { Authorization: `Bearer ${token}` }
       })
 
@@ -235,6 +238,7 @@ export function AuthProvider({ children }) {
       }
 
       const user = await response.json()
+      storeAuthSession(token)
       setCurrentUser(buildUserWithInitials(user))
       setHasCheckedAuth(true)
     } catch {

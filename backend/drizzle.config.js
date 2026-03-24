@@ -5,7 +5,7 @@ import { fileURLToPath } from 'node:url'
 
 const __filename = fileURLToPath(import.meta.url)
 const __dirname = path.dirname(__filename)
-const envFilePath = path.join(__dirname, 'backend', '.env')
+const envFilePath = path.join(__dirname, '.env')
 
 function loadEnvFileFallback(filePath) {
   try {
@@ -53,8 +53,8 @@ if (!usedNativeEnvLoader) {
 
 export default {
   dialect: 'postgresql',
-  schema: './backend/db/schema.js',
-  out: './backend/drizzle',
+  schema: './db/schema.js',
+  out: './drizzle',
   dbCredentials: {
     url: process.env.DATABASE_URL || ''
   },

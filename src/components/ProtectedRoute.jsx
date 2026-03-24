@@ -1,45 +1,19 @@
-import { useEffect, useState } from 'react'
+import { Navigate, useLocation } from 'react-router-dom'
+import { getAuthToken } from '../api/client'
 import { useAuth } from '../context/AuthContext'
-import AuthLanding from './AuthLanding'
 import SplashScreen from './SplashScreen'
 
-const TOKEN_KEY = 'auth_token'
-
 export default function ProtectedRoute({ children }) {
-  const { isAuthenticated, checkAuth } = useAuth()
-  const [isAuthChecked, setIsAuthChecked] = useState(false)
-  const hasStoredToken = !!localStorage.getItem(TOKEN_KEY)
+  const location = useLocation()
+  const { isAuthenticated, hasCheckedAuth } = useAuth()
+  const hasStoredToken = !!getAuthToken()
 
-  useEffect(() => {
-    let isMounted = true
-
-    const initializeAuth = async () => {
-      setIsAuthChecked(false)
-
-      try {
-        if (hasStoredToken) {
-          await checkAuth()
-        }
-      } finally {
-        if (isMounted) {
-          setIsAuthChecked(true)
-        }
-      }
-    }
-
-    initializeAuth()
-
-    return () => {
-      isMounted = false
-    }
-  }, [checkAuth, hasStoredToken])
-
-  if (hasStoredToken && !isAuthChecked) {
+  if (!hasCheckedAuth && hasStoredToken) {
     return <SplashScreen />
   }
 
   if (!isAuthenticated) {
-    return <AuthLanding />
+    return <Navigate to="/login" replace state={{ from: location }} />
   }
 
   return children

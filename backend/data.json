@@ -1053,6 +1053,23 @@
       "createdAt": "2026-03-24T15:35:42.472Z",
       "updatedAt": "2026-03-24T15:35:42.472Z",
       "deletedAt": null
+    },
+    {
+      "id": "e928a6bf-ad1f-4783-90bd-a778c947d63d",
+      "email": "bv2@gmail.com",
+      "username": "bv",
+      "passwordHash": "$2b$10$kPHrDcTAdFuWW0f14jevG.Symi5.nNusnE7DSdzh/zzUtUCXPRXuS",
+      "fullName": "gf",
+      "bio": "social",
+      "website": "http://www.ggm.com",
+      "profilePicture": "https://res.cloudinary.com/dg7ijkecs/image/upload/v1771969173/samples/imagecon-group.jpg",
+      "isPrivate": false,
+      "isVerified": false,
+      "followerCount": 0,
+      "followingCount": 0,
+      "createdAt": "2026-03-24T17:09:12.098Z",
+      "updatedAt": "2026-03-24T17:09:12.098Z",
+      "deletedAt": null
     }
   ],
   "posts": [
@@ -1627,15 +1644,6 @@
       "caption": "",
       "createdAt": "2026-03-17T19:37:13.228Z",
       "expiresAt": "2026-03-18T19:37:13.228Z",
-      "deletedAt": null
-    },
-    {
-      "id": "dcfb4c6d-1584-4ee3-a006-fa7ca75a5244",
-      "userId": "57437c07-1b1a-4ef6-95b2-864c00cde80a",
-      "imageUrl": "https://res.cloudinary.com/dg7ijkecs/image/upload/v1771969173/samples/ecommerce/accessories-bag.jpg",
-      "caption": "",
-      "createdAt": "2026-03-24T15:48:50.342Z",
-      "expiresAt": "2026-03-25T15:48:50.342Z",
       "deletedAt": null
     }
   ]
