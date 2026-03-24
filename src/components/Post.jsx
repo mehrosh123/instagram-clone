@@ -1,4 +1,4 @@
-import { useEffect, useState } from 'react'
+import { useState } from 'react'
 
 /**
  * THEORY: Post Component
@@ -26,8 +26,6 @@ export default function Post({
   onDeleteComment,
   onCommentLike
 }) {
-  if (!post) return null
-
   const isValidImageSource = (value) => {
     if (typeof value !== 'string') return false
     const src = value.trim()
@@ -55,12 +53,13 @@ export default function Post({
   const [showComments, setShowComments] = useState(false)
   const [isPostingComment, setIsPostingComment] = useState(false)
   const [currentImageIndex, setCurrentImageIndex] = useState(0)
-  const postImages = Array.isArray(post.images) && post.images.length > 0
+  const postImages = Array.isArray(post?.images) && post.images.length > 0
     ? post.images.filter(isValidImageSource).slice(0, 10)
-    : [post.image].filter(isValidImageSource)
+    : [post?.image].filter(isValidImageSource)
   const safeImages = postImages.length > 0 ? postImages : ['https://images.unsplash.com/photo-1503899036084-c55cdd92da26?w=1000&auto=format&fit=crop']
-  const safeComments = Array.isArray(post.comments) ? post.comments : []
-  const safeLikedByUsers = Array.isArray(post.likedByUsers) ? post.likedByUsers : []
+  const safeComments = Array.isArray(post?.comments) ? post.comments : []
+  const safeLikedByUsers = Array.isArray(post?.likedByUsers) ? post.likedByUsers : []
+  const activeImageIndex = currentImageIndex >= safeImages.length ? 0 : currentImageIndex
 
   /**
    * THEORY: Controlled Components
@@ -74,12 +73,13 @@ export default function Post({
   }
 
   const handlePostComment = async () => {
-    if (!commentText.trim() || isPostingComment) return
+    const nextComment = commentText.trim()
+    if (!nextComment || isPostingComment) return
 
     setIsPostingComment(true)
-    const submitted = await onComment(post.id, {
+    const submitted = await onComment?.(post.id, {
       user: 'You',
-      text: commentText
+      text: nextComment
     })
 
     if (submitted) {
@@ -90,19 +90,15 @@ export default function Post({
     setIsPostingComment(false)
   }
 
-  useEffect(() => {
-    if (currentImageIndex >= safeImages.length) {
-      setCurrentImageIndex(0)
-    }
-  }, [currentImageIndex, safeImages.length])
-
   const goToPrevImage = () => {
-    setCurrentImageIndex(prev => (prev === 0 ? safeImages.length - 1 : prev - 1))
+    setCurrentImageIndex(activeImageIndex === 0 ? safeImages.length - 1 : activeImageIndex - 1)
   }
 
   const goToNextImage = () => {
-    setCurrentImageIndex(prev => (prev === safeImages.length - 1 ? 0 : prev + 1))
+    setCurrentImageIndex(activeImageIndex === safeImages.length - 1 ? 0 : activeImageIndex + 1)
   }
+
+  if (!post) return null
 
   return (
     <article className="bg-white border border-gray-200 rounded-lg overflow-hidden mb-5">
@@ -137,8 +133,8 @@ export default function Post({
 
       <div className="relative bg-black">
         <img
-          src={safeImages[currentImageIndex]}
-          alt={`${post.caption || 'Post image'} ${currentImageIndex + 1}`}
+          src={safeImages[activeImageIndex]}
+          alt={`${post.caption || 'Post image'} ${activeImageIndex + 1}`}
           className="w-full h-auto aspect-square object-cover"
         />
 
@@ -163,7 +159,7 @@ export default function Post({
             </button>
 
             <div className="absolute top-3 right-3 bg-black/55 text-white text-xs rounded-full px-2 py-1">
-              {currentImageIndex + 1}/{safeImages.length}
+              {activeImageIndex + 1}/{safeImages.length}
             </div>
 
             <div className="absolute bottom-3 left-1/2 -translate-x-1/2 flex items-center gap-1.5">
@@ -172,7 +168,7 @@ export default function Post({
                   key={`${post.id}-dot-${index}`}
                   type="button"
                   aria-label={`Go to image ${index + 1}`}
-                  className={index === currentImageIndex
+                  className={index === activeImageIndex
                     ? 'h-2 w-2 rounded-full bg-blue-400'
                     : 'h-2 w-2 rounded-full bg-white/65'}
                   onClick={() => setCurrentImageIndex(index)}
@@ -215,42 +211,61 @@ export default function Post({
           className="text-xs text-gray-500 mb-2 hover:text-gray-700"
           onClick={() => setShowComments(!showComments)}
         >
-          {showComments ? 'Hide' : 'View'} all {safeComments.length} comments
+          {showComments ? 'Hide' : 'View'} all {post.commentsCount ?? safeComments.length} comments
         </button>
 
         {showComments && (
           <div className="space-y-2">
-            {safeComments.map((comment, index) => (
-              <div key={comment.id || index} className="text-sm leading-5">
-                <button
-                  type="button"
-                  className="font-semibold mr-1 hover:underline"
-                  onClick={() => onOpenProfile?.(comment.user)}
-                >
-                  {comment.user}
-                </button>
-                <p className="inline">{comment.text}</p>
-                <span className="inline-flex gap-2 items-center ml-2">
+            {safeComments.map((comment, index) => {
+              const canEditComment = comment.userId === currentUserId
+              const canDeleteComment = canManage || comment.userId === currentUserId
+
+              return (
+                <div key={comment.id || index} className="text-sm leading-5">
                   <button
                     type="button"
-                    className="text-xs text-blue-500 border border-gray-200 rounded px-2 py-0.5"
-                    onClick={() => onCommentLike?.(post.id, comment.id, !!comment.liked)}
+                    className="font-semibold mr-1 hover:underline"
+                    onClick={() => onOpenProfile?.(comment.user)}
                   >
-                    {comment.liked ? 'Unlike' : 'Like'}
+                    {comment.user}
                   </button>
-                  <small className="text-xs text-gray-500">{comment.likes || 0} likes</small>
-                  {comment.likedByUsers?.length > 0 && (
-                    <small className="text-xs text-gray-500">by {comment.likedByUsers.slice(0, 2).join(', ')}</small>
-                  )}
-                </span>
-                {(canManage || comment.userId === currentUserId) && (
-                  <span className="inline-flex gap-2 ml-2">
-                    <button className="text-xs text-gray-500 border border-gray-200 rounded px-2 py-0.5" onClick={() => onEditComment(comment.id, post.id, comment.text)}>Edit</button>
-                    <button className="text-xs text-red-500 border border-red-200 rounded px-2 py-0.5" onClick={() => onDeleteComment(comment.id, post.id)}>Delete</button>
+                  <p className="inline">{comment.text}</p>
+                  <span className="inline-flex gap-2 items-center ml-2">
+                    <button
+                      type="button"
+                      className="text-xs text-blue-500 border border-gray-200 rounded px-2 py-0.5"
+                      onClick={() => onCommentLike?.(post.id, comment.id, !!comment.liked)}
+                    >
+                      {comment.liked ? 'Unlike' : 'Like'}
+                    </button>
+                    <small className="text-xs text-gray-500">{comment.likes || 0} likes</small>
+                    {comment.likedByUsers?.length > 0 && (
+                      <small className="text-xs text-gray-500">by {comment.likedByUsers.slice(0, 2).join(', ')}</small>
+                    )}
                   </span>
-                )}
-              </div>
-            ))}
+                  {(canEditComment || canDeleteComment) && (
+                    <span className="inline-flex gap-2 ml-2">
+                      {canEditComment && (
+                        <button
+                          className="text-xs text-gray-500 border border-gray-200 rounded px-2 py-0.5"
+                          onClick={() => onEditComment?.(comment.id, post.id, comment.text)}
+                        >
+                          Edit
+                        </button>
+                      )}
+                      {canDeleteComment && (
+                        <button
+                          className="text-xs text-red-500 border border-red-200 rounded px-2 py-0.5"
+                          onClick={() => onDeleteComment?.(comment.id, post.id)}
+                        >
+                          Delete
+                        </button>
+                      )}
+                    </span>
+                  )}
+                </div>
+              )
+            })}
           </div>
         )}
       </div>

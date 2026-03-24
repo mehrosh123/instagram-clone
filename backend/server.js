@@ -236,6 +236,30 @@ function toApiPostFromDb(post, images = []) {
   }
 }
 
+function toApiComment(comment, author, { viewerId = null, likedByUsers } = {}) {
+  const hasLikedUsers = Array.isArray(likedByUsers)
+  const normalizedLikedByUsers = hasLikedUsers ? likedByUsers.filter(Boolean) : []
+
+  return {
+    id: comment.id,
+    postId: comment.postId,
+    userId: comment.userId,
+    text: comment.text,
+    likesCount: hasLikedUsers ? normalizedLikedByUsers.length : Number(comment.likesCount || 0),
+    parentCommentId: comment.parentCommentId,
+    createdAt: comment.createdAt,
+    updatedAt: comment.updatedAt,
+    deletedAt: comment.deletedAt || null,
+    likedByMe: hasLikedUsers
+      ? normalizedLikedByUsers.some(user => user.id === viewerId)
+      : false,
+    likedByUsers: hasLikedUsers
+      ? normalizedLikedByUsers.map(toApiUserFromDb)
+      : [],
+    author: author ? toApiUserFromDb(author) : null
+  }
+}
+
 function toStoryOwner(user) {
   if (!user) return null
   return {
@@ -336,6 +360,24 @@ function canViewUserContent(viewerId, owner, db) {
   return db.follows.some(
     f => f.followerId === viewerId && f.followingId === owner.id && f.status === 'accepted'
   )
+}
+
+async function canViewUserContentInDb(viewerId, owner) {
+  if (!owner) return false
+  if (!owner.isPrivate) return true
+  if (viewerId && owner.id === viewerId) return true
+
+  const relationship = await db
+    .select({ id: follows.id })
+    .from(follows)
+    .where(and(
+      eq(follows.followerId, viewerId),
+      eq(follows.followingId, owner.id),
+      eq(follows.status, 'accepted')
+    ))
+    .limit(1)
+
+  return relationship.length > 0
 }
 
 function isValidImageSource(value) {
@@ -729,23 +771,12 @@ app.get('/api/posts/feed', authRequired, async (req, res) => {
       for (const comment of commentsRows) {
         const commentLikes = likesByCommentId.get(comment.id) || []
         const author = userMap.get(comment.userId)
-        const commentPayload = {
-          id: comment.id,
-          postId: comment.postId,
-          userId: comment.userId,
-          text: comment.text,
-          likesCount: commentLikes.length,
-          parentCommentId: comment.parentCommentId,
-          createdAt: comment.createdAt,
-          updatedAt: comment.updatedAt,
-          deletedAt: comment.deletedAt,
-          likedByMe: commentLikes.some(like => like.userId === req.userId),
+        const commentPayload = toApiComment(comment, author, {
+          viewerId: req.userId,
           likedByUsers: commentLikes
             .map(like => userMap.get(like.userId))
             .filter(Boolean)
-            .map(toApiUserFromDb),
-          author: author ? toApiUserFromDb(author) : null
-        }
+        })
 
         if (!commentsByPostId.has(comment.postId)) commentsByPostId.set(comment.postId, [])
         commentsByPostId.get(comment.postId).push(commentPayload)
@@ -803,15 +834,11 @@ app.get('/api/posts/feed', authRequired, async (req, res) => {
           const commentLikedByUsers = commentLikes
             .map(like => dbState.users.find(user => user.id === like.userId))
             .filter(Boolean)
-            .map(user => safeUser(user))
 
-          return {
-            ...comment,
-            likesCount: commentLikes.length,
-            likedByMe: commentLikes.some(like => like.userId === req.userId),
-            likedByUsers: commentLikedByUsers,
-            author: author ? safeUser(author) : null
-          }
+          return toApiComment(comment, author, {
+            viewerId: req.userId,
+            likedByUsers: commentLikedByUsers
+          })
         })
       const likedByMe = postLikes.some(like => like.userId === req.userId)
       const likesCount = postLikes.length
@@ -828,6 +855,105 @@ app.get('/api/posts/feed', authRequired, async (req, res) => {
     })
 
   res.json({ posts: feed })
+})
+
+app.get('/api/posts/:id/comments', authRequired, async (req, res) => {
+  if (USE_POSTGRES_RUNTIME && db) {
+    try {
+      const postRows = await db
+        .select()
+        .from(posts)
+        .where(and(eq(posts.id, req.params.id), isNull(posts.deletedAt)))
+        .limit(1)
+      const post = postRows[0]
+      if (!post) return res.status(404).json({ error: 'Post not found' })
+
+      const ownerRows = await db
+        .select()
+        .from(users)
+        .where(and(eq(users.id, post.userId), isNull(users.deletedAt)))
+        .limit(1)
+      const owner = ownerRows[0]
+      if (!owner) return res.status(404).json({ error: 'Post owner not found' })
+
+      const canView = await canViewUserContentInDb(req.userId, owner)
+      if (!canView) {
+        return res.status(403).json({ error: 'Not allowed to view comments on this post' })
+      }
+
+      const commentRows = await db
+        .select()
+        .from(comments)
+        .where(and(eq(comments.postId, post.id), isNull(comments.deletedAt)))
+        .orderBy(comments.createdAt)
+
+      if (commentRows.length === 0) {
+        return res.json({ comments: [] })
+      }
+
+      const commentIds = commentRows.map(comment => comment.id)
+      const authorIds = [...new Set(commentRows.map(comment => comment.userId))]
+      const likeRows = await db
+        .select()
+        .from(likes)
+        .where(inArray(likes.commentId, commentIds))
+      const likeUserIds = [...new Set(likeRows.map(like => like.userId))]
+      const relatedUserIds = [...new Set([...authorIds, ...likeUserIds])]
+
+      const userRows = relatedUserIds.length > 0
+        ? await db
+          .select()
+          .from(users)
+          .where(and(inArray(users.id, relatedUserIds), isNull(users.deletedAt)))
+        : []
+      const userMap = new Map(userRows.map(user => [user.id, user]))
+
+      const likesByCommentId = new Map()
+      for (const like of likeRows) {
+        if (!likesByCommentId.has(like.commentId)) likesByCommentId.set(like.commentId, [])
+        likesByCommentId.get(like.commentId).push(like)
+      }
+
+      const payload = commentRows.map(comment => toApiComment(comment, userMap.get(comment.userId), {
+        viewerId: req.userId,
+        likedByUsers: (likesByCommentId.get(comment.id) || [])
+          .map(like => userMap.get(like.userId))
+          .filter(Boolean)
+      }))
+
+      return res.json({ comments: payload })
+    } catch (err) {
+      console.error('Post comments DB error:', err)
+      return res.status(500).json({ error: 'Failed to load comments' })
+    }
+  }
+
+  const dbState = readDb()
+  const post = dbState.posts.find(p => p.id === req.params.id && !p.deletedAt)
+  if (!post) return res.status(404).json({ error: 'Post not found' })
+
+  const owner = dbState.users.find(user => user.id === post.userId)
+  if (!canViewUserContent(req.userId, owner, dbState)) {
+    return res.status(403).json({ error: 'Not allowed to view comments on this post' })
+  }
+
+  const payload = dbState.comments
+    .filter(comment => comment.postId === post.id && !comment.deletedAt)
+    .sort((a, b) => new Date(a.createdAt) - new Date(b.createdAt))
+    .map(comment => {
+      const author = dbState.users.find(user => user.id === comment.userId)
+      const likedByUsers = dbState.likes
+        .filter(like => like.commentId === comment.id)
+        .map(like => dbState.users.find(user => user.id === like.userId))
+        .filter(Boolean)
+
+      return toApiComment(comment, author, {
+        viewerId: req.userId,
+        likedByUsers
+      })
+    })
+
+  return res.json({ comments: payload })
 })
 
 app.put('/api/posts/:id', authRequired, async (req, res) => {
@@ -997,19 +1123,7 @@ app.post('/api/posts/:id/comments', authRequired, async (req, res) => {
       const owner = ownerRows[0]
       if (!owner) return res.status(404).json({ error: 'Post owner not found' })
 
-      let canView = !owner.isPrivate || owner.id === req.userId
-      if (!canView) {
-        const rel = await db
-          .select()
-          .from(follows)
-          .where(and(
-            eq(follows.followerId, req.userId),
-            eq(follows.followingId, owner.id),
-            eq(follows.status, 'accepted')
-          ))
-          .limit(1)
-        canView = rel.length > 0
-      }
+      const canView = await canViewUserContentInDb(req.userId, owner)
       if (!canView) {
         return res.status(403).json({ error: 'Not allowed to comment on this post' })
       }
@@ -1031,7 +1145,16 @@ app.post('/api/posts/:id/comments', authRequired, async (req, res) => {
         .set({ commentsCount: sql`${posts.commentsCount} + 1`, updatedAt: new Date() })
         .where(eq(posts.id, post.id))
 
-      return res.status(201).json(inserted[0])
+      const authorRows = await db
+        .select()
+        .from(users)
+        .where(and(eq(users.id, req.userId), isNull(users.deletedAt)))
+        .limit(1)
+
+      return res.status(201).json(toApiComment(inserted[0], authorRows[0], {
+        viewerId: req.userId,
+        likedByUsers: []
+      }))
     } catch (err) {
       console.error('Create comment DB error:', err)
       return res.status(500).json({ error: 'Failed to create comment' })
@@ -1063,7 +1186,11 @@ app.post('/api/posts/:id/comments', authRequired, async (req, res) => {
   dbState.comments.push(comment)
   post.commentsCount += 1
   writeDb(dbState)
-  res.status(201).json(comment)
+  const author = dbState.users.find(user => user.id === req.userId)
+  res.status(201).json(toApiComment(comment, author, {
+    viewerId: req.userId,
+    likedByUsers: []
+  }))
 })
 
 app.put('/api/comments/:id', authRequired, async (req, res) => {
@@ -1077,16 +1204,8 @@ app.put('/api/comments/:id', authRequired, async (req, res) => {
       const comment = commentRows[0]
       if (!comment) return res.status(404).json({ error: 'Comment not found' })
 
-      const postRows = await db
-        .select()
-        .from(posts)
-        .where(and(eq(posts.id, comment.postId), isNull(posts.deletedAt)))
-        .limit(1)
-      const post = postRows[0]
-
-      const canManage = comment.userId === req.userId || post?.userId === req.userId
-      if (!canManage) {
-        return res.status(403).json({ error: 'Not allowed to edit this comment' })
+      if (comment.userId !== req.userId) {
+        return res.status(403).json({ error: 'Only the comment author can edit this comment' })
       }
 
       const { text } = req.body
@@ -1111,10 +1230,8 @@ app.put('/api/comments/:id', authRequired, async (req, res) => {
   const comment = dbState.comments.find(c => c.id === req.params.id && !c.deletedAt)
   if (!comment) return res.status(404).json({ error: 'Comment not found' })
 
-  const post = dbState.posts.find(p => p.id === comment.postId && !p.deletedAt)
-  const canManage = comment.userId === req.userId || post?.userId === req.userId
-  if (!canManage) {
-    return res.status(403).json({ error: 'Not allowed to edit this comment' })
+  if (comment.userId !== req.userId) {
+    return res.status(403).json({ error: 'Only the comment author can edit this comment' })
   }
 
   const { text } = req.body
@@ -1146,9 +1263,9 @@ app.delete('/api/comments/:id', authRequired, async (req, res) => {
         .limit(1)
       const post = postRows[0]
 
-      const canManage = comment.userId === req.userId || post?.userId === req.userId
-      if (!canManage) {
-        return res.status(403).json({ error: 'Not allowed to delete this comment' })
+      const canDelete = comment.userId === req.userId || post?.userId === req.userId
+      if (!canDelete) {
+        return res.status(403).json({ error: 'Only the comment author or post owner can delete this comment' })
       }
 
       await db
@@ -1175,9 +1292,9 @@ app.delete('/api/comments/:id', authRequired, async (req, res) => {
   if (!comment) return res.status(404).json({ error: 'Comment not found' })
 
   const post = dbState.posts.find(p => p.id === comment.postId && !p.deletedAt)
-  const canManage = comment.userId === req.userId || post?.userId === req.userId
-  if (!canManage) {
-    return res.status(403).json({ error: 'Not allowed to delete this comment' })
+  const canDelete = comment.userId === req.userId || post?.userId === req.userId
+  if (!canDelete) {
+    return res.status(403).json({ error: 'Only the comment author or post owner can delete this comment' })
   }
 
   comment.deletedAt = new Date().toISOString()
@@ -1198,14 +1315,25 @@ app.post('/api/posts/:id/like', authRequired, async (req, res) => {
       const post = postRows[0]
       if (!post) return res.status(404).json({ error: 'Post not found' })
 
-      const existing = await db
-        .select()
-        .from(likes)
-        .where(and(eq(likes.userId, req.userId), eq(likes.postId, post.id), isNull(likes.commentId)))
-        .limit(1)
+      // Legacy comment-like rows stored postId as well as commentId.
+      // Normalize them so post likes and comment likes do not fight over the same unique key.
+      await db
+        .update(likes)
+        .set({ postId: null })
+        .where(and(eq(likes.userId, req.userId), eq(likes.postId, post.id), sql`${likes.commentId} IS NOT NULL`))
 
-      if (existing.length === 0) {
-        await db.insert(likes).values({ userId: req.userId, postId: post.id, commentId: null })
+      const inserted = await db
+        .insert(likes)
+        .values({ userId: req.userId, postId: post.id, commentId: null })
+        .onConflictDoNothing({ target: [likes.userId, likes.postId] })
+        .returning({ id: likes.id })
+
+      let liked = inserted.length > 0
+
+      if (!liked) {
+        await db
+          .delete(likes)
+          .where(and(eq(likes.userId, req.userId), eq(likes.postId, post.id), isNull(likes.commentId)))
       }
 
       const postLikes = await db
@@ -1223,10 +1351,13 @@ app.post('/api/posts/:id/like', authRequired, async (req, res) => {
         ? await db.select({ username: users.username }).from(users).where(inArray(users.id, likerIds))
         : []
       const likedByUsers = likerUsers.map(user => user.username)
-      return res.status(existing.length === 0 ? 201 : 200).json({ liked: true, likesCount: postLikes.length, likedByUsers })
+      return res.status(inserted.length > 0 ? 201 : 200).json({ liked, likesCount: postLikes.length, likedByUsers })
     } catch (err) {
       console.error('Post like DB error:', err)
-      return res.status(500).json({ error: 'Failed to like post' })
+      return res.status(500).json({
+        error: 'Failed to toggle like on post',
+        ...(IS_PRODUCTION ? {} : { details: err?.message || 'Unknown database error', code: err?.code || null })
+      })
     }
   }
 
@@ -1234,14 +1365,24 @@ app.post('/api/posts/:id/like', authRequired, async (req, res) => {
   const post = dbState.posts.find(p => p.id === req.params.id && !p.deletedAt)
   if (!post) return res.status(404).json({ error: 'Post not found' })
 
+  dbState.likes.forEach(like => {
+    if (like.userId === req.userId && like.postId === post.id && like.commentId) {
+      like.postId = null
+    }
+  })
+
   const existing = dbState.likes.find(l => l.userId === req.userId && l.postId === post.id && !l.commentId)
   if (existing) {
-    syncPostCounters(dbState)
+    const index = dbState.likes.findIndex(l => l.id === existing.id)
+    if (index !== -1) {
+      dbState.likes.splice(index, 1)
+    }
+    writeDb(dbState)
     const likedByUsers = dbState.likes
       .filter(like => like.postId === post.id && !like.commentId)
       .map(like => dbState.users.find(user => user.id === like.userId)?.username)
       .filter(Boolean)
-    return res.status(200).json({ liked: true, likesCount: post.likesCount, likedByUsers })
+    return res.status(200).json({ liked: false, likesCount: likedByUsers.length, likedByUsers })
   }
 
   dbState.likes.push({
@@ -1345,7 +1486,10 @@ app.post('/api/comments/:id/like', authRequired, async (req, res) => {
         .limit(1)
 
       if (existing.length === 0) {
-        await db.insert(likes).values({ userId: req.userId, postId: comment.postId, commentId: comment.id })
+        await db
+          .insert(likes)
+          .values({ userId: req.userId, postId: null, commentId: comment.id })
+          .onConflictDoNothing({ target: [likes.userId, likes.commentId] })
       }
 
       const commentLikes = await db
@@ -1386,7 +1530,7 @@ app.post('/api/comments/:id/like', authRequired, async (req, res) => {
   dbState.likes.push({
     id: randomUUID(),
     userId: req.userId,
-    postId: comment.postId,
+    postId: null,
     commentId: comment.id,
     createdAt: new Date().toISOString()
   })
