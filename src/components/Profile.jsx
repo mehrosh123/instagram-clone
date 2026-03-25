@@ -1,14 +1,15 @@
 import { useCallback, useEffect, useState } from 'react'
-import { FollowersList, FollowingList } from './Followers'
+import { FollowRequests, FollowersList, FollowingList } from './Followers'
 import { useAuth } from '../context/AuthContext'
 import { apiFetch } from '../api/client'
 import '../styles/Profile.css'
 
-export default function Profile() {
+export default function Profile({ onOpenProfile }) {
   const { currentUser, updateCurrentUser } = useAuth()
   const [userPosts, setUserPosts] = useState([])
   const [followers, setFollowers] = useState([])
   const [following, setFollowing] = useState([])
+  const [followRequests, setFollowRequests] = useState([])
   const [activePanel, setActivePanel] = useState('posts')
   const [postActionError, setPostActionError] = useState('')
   const [relationshipError, setRelationshipError] = useState('')
@@ -55,13 +56,19 @@ export default function Profile() {
       setUserPosts([])
       setFollowers([])
       setFollowing([])
+      setFollowRequests([])
       return
     }
 
-    const [profileData, followersData, followingData] = await Promise.all([
+    const requestsPromise = currentUser?.isPrivate
+      ? apiFetch(`/api/users/${currentUser.id}/follow-requests`)
+      : Promise.resolve({ requests: [] })
+
+    const [profileData, followersData, followingData, requestsData] = await Promise.all([
       apiFetch(`/api/users/${currentUser.username}`),
       apiFetch(`/api/users/${currentUser.id}/followers`),
-      apiFetch(`/api/users/${currentUser.id}/following`)
+      apiFetch(`/api/users/${currentUser.id}/following`),
+      requestsPromise
     ])
 
     const mappedPosts = (profileData.posts || []).map(post => ({
@@ -78,6 +85,7 @@ export default function Profile() {
     setUserPosts(mappedPosts)
     setFollowers(Array.isArray(followersData.followers) ? followersData.followers : [])
     setFollowing(Array.isArray(followingData.following) ? followingData.following : [])
+    setFollowRequests(Array.isArray(requestsData.requests) ? requestsData.requests : [])
 
     if (profileData.user) {
       updateCurrentUser({
@@ -91,7 +99,7 @@ export default function Profile() {
         followingCount: profileData.user.followingCount ?? 0
       })
     }
-  }, [currentUser?.id, currentUser?.username, updateCurrentUser])
+  }, [currentUser, updateCurrentUser])
 
   useEffect(() => {
     let active = true
@@ -104,6 +112,7 @@ export default function Profile() {
         setUserPosts([])
         setFollowers([])
         setFollowing([])
+        setFollowRequests([])
       }
     }
 
@@ -265,6 +274,30 @@ export default function Profile() {
     }
   }
 
+  const handleApproveRequest = async (followId) => {
+    if (!followId) return
+
+    try {
+      setRelationshipError('')
+      await apiFetch(`/api/follows/${followId}/approve`, { method: 'POST' })
+      await loadProfileData()
+    } catch (err) {
+      setRelationshipError(err.message || 'Failed to approve request')
+    }
+  }
+
+  const handleRejectRequest = async (followId) => {
+    if (!followId) return
+
+    try {
+      setRelationshipError('')
+      await apiFetch(`/api/follows/${followId}/reject`, { method: 'POST' })
+      await loadProfileData()
+    } catch (err) {
+      setRelationshipError(err.message || 'Failed to reject request')
+    }
+  }
+
   return (
     <div className="profile">
       <div className="profile-header">
@@ -314,6 +347,11 @@ export default function Profile() {
         <button className={`tab ${activePanel === 'posts' ? 'active' : ''}`} onClick={() => setActivePanel('posts')}>Posts</button>
         <button className={`tab ${activePanel === 'followers' ? 'active' : ''}`} onClick={() => setActivePanel('followers')}>Followers</button>
         <button className={`tab ${activePanel === 'following' ? 'active' : ''}`} onClick={() => setActivePanel('following')}>Following</button>
+        {currentUser?.isPrivate ? (
+          <button className={`tab ${activePanel === 'requests' ? 'active' : ''}`} onClick={() => setActivePanel('requests')}>
+            Requests {followRequests.length > 0 ? `(${followRequests.length})` : ''}
+          </button>
+        ) : null}
         <button className="tab create-post-tab" onClick={handleCreatePost}>Create Post</button>
       </div>
 
@@ -323,11 +361,15 @@ export default function Profile() {
 
       {activePanel === 'followers' ? (
         <div className="profile-connections">
-          <FollowersList followers={followers} onRemove={handleRemoveFollower} />
+          <FollowersList followers={followers} onRemove={handleRemoveFollower} onOpenProfile={onOpenProfile} />
         </div>
       ) : activePanel === 'following' ? (
         <div className="profile-connections">
-          <FollowingList following={following} onUnfollow={handleUnfollow} />
+          <FollowingList following={following} onUnfollow={handleUnfollow} onOpenProfile={onOpenProfile} />
+        </div>
+      ) : activePanel === 'requests' ? (
+        <div className="profile-connections">
+          <FollowRequests requests={followRequests} onApprove={handleApproveRequest} onReject={handleRejectRequest} />
         </div>
       ) : (
         <div className="posts-grid">

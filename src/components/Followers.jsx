@@ -1,5 +1,6 @@
 import { useEffect, useState } from 'react'
 import { apiFetch } from '../api/client'
+import { useAuth } from '../context/AuthContext'
 import '../styles/Followers.css'
 
 function Avatar({ src, alt, className }) {
@@ -11,8 +12,15 @@ function Avatar({ src, alt, className }) {
 }
 
 export default function FollowButton({ userId, isPrivate = false }) {
-  const [isFollowing, setIsFollowing] = useState(false)
-  const [isPending, setIsPending] = useState(false)
+  const { currentUser } = useAuth()
+  const isSelf = !userId || currentUser?.id === userId
+  const [relationship, setRelationship] = useState({
+    status: 'none',
+    isFollowing: false,
+    isPending: false,
+    followsMe: false,
+    isMutual: false
+  })
   const [isLoading, setIsLoading] = useState(false)
   const [error, setError] = useState(null)
 
@@ -20,22 +28,48 @@ export default function FollowButton({ userId, isPrivate = false }) {
     let active = true
 
     const loadStatus = async () => {
+      if (isSelf) {
+        setRelationship({
+          status: 'self',
+          isFollowing: false,
+          isPending: false,
+          followsMe: false,
+          isMutual: false
+        })
+        return
+      }
+
       const normalizedId = String(userId || '').trim()
       if (!normalizedId || /[\s/,]/.test(normalizedId)) {
-        setIsFollowing(false)
-        setIsPending(false)
+        setRelationship({
+          status: 'none',
+          isFollowing: false,
+          isPending: false,
+          followsMe: false,
+          isMutual: false
+        })
         return
       }
 
       try {
         const status = await apiFetch(`/api/users/${encodeURIComponent(normalizedId)}/follow-status`)
         if (!active) return
-        setIsFollowing(!!status.isFollowing)
-        setIsPending(!!status.isPending)
+        setRelationship({
+          status: status.status || 'none',
+          isFollowing: !!status.isFollowing,
+          isPending: !!status.isPending,
+          followsMe: !!status.followsMe,
+          isMutual: !!status.isMutual
+        })
       } catch {
         if (!active) return
-        setIsFollowing(false)
-        setIsPending(false)
+        setRelationship({
+          status: 'none',
+          isFollowing: false,
+          isPending: false,
+          followsMe: false,
+          isMutual: false
+        })
       }
     }
 
@@ -44,7 +78,7 @@ export default function FollowButton({ userId, isPrivate = false }) {
     return () => {
       active = false
     }
-  }, [userId])
+  }, [isSelf, userId])
 
   const handleFollowClick = async () => {
     if (isLoading) return
@@ -56,23 +90,39 @@ export default function FollowButton({ userId, isPrivate = false }) {
     setError(null)
 
     try {
-      if (isFollowing || isPending) {
+      if (relationship.isFollowing || relationship.isPending) {
         await apiFetch(`/api/users/${encodeURIComponent(normalizedId)}/follow`, {
           method: 'DELETE'
         })
-        setIsFollowing(false)
-        setIsPending(false)
+        setRelationship(prev => ({
+          ...prev,
+          status: 'none',
+          isFollowing: false,
+          isPending: false,
+          isMutual: false
+        }))
       } else {
         const relationship = await apiFetch(`/api/users/${encodeURIComponent(normalizedId)}/follow`, {
           method: 'POST'
         })
 
         if (relationship.status === 'pending' || isPrivate) {
-          setIsFollowing(false)
-          setIsPending(true)
+          setRelationship(prev => ({
+            ...prev,
+            status: 'pending',
+            isFollowing: false,
+            isPending: true,
+            isMutual: false
+          }))
         } else {
-          setIsFollowing(true)
-          setIsPending(false)
+          const latestStatus = await apiFetch(`/api/users/${encodeURIComponent(normalizedId)}/follow-status`)
+          setRelationship({
+            status: latestStatus.status || 'accepted',
+            isFollowing: !!latestStatus.isFollowing,
+            isPending: !!latestStatus.isPending,
+            followsMe: !!latestStatus.followsMe,
+            isMutual: !!latestStatus.isMutual
+          })
         }
       }
     } catch (err) {
@@ -83,15 +133,21 @@ export default function FollowButton({ userId, isPrivate = false }) {
     }
   }
 
-  const buttonText = isPending
-    ? 'Pending'
-    : isFollowing
-      ? 'Following'
-      : 'Follow'
+  const buttonText = relationship.isPending
+    ? 'Requested'
+    : relationship.isMutual
+      ? 'Friends'
+      : relationship.isFollowing
+        ? 'Following'
+        : 'Follow'
+
+  if (isSelf) {
+    return null
+  }
 
   return (
     <button
-      className={`follow-btn ${isFollowing ? 'following' : ''} ${isPending ? 'pending' : ''}`}
+      className={`follow-btn ${relationship.isFollowing ? 'following' : ''} ${relationship.isPending ? 'pending' : ''} ${relationship.isMutual ? 'friends' : ''}`}
       onClick={handleFollowClick}
       disabled={isLoading}
       title={buttonText}

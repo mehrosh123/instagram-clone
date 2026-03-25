@@ -1,6 +1,7 @@
 import { useEffect, useState } from 'react'
-import { Navigate, Route, Routes } from 'react-router-dom'
+import { Navigate, Route, Routes, useNavigate, useParams } from 'react-router-dom'
 import Feed from './components/Feed'
+import Header from './components/Header'
 import Profile from './components/Profile'
 import Sidebar from './components/Sidebar'
 import AuthLanding from './components/AuthLanding'
@@ -10,36 +11,6 @@ import FollowButton from './components/Followers'
 import { useAuth } from './context/AuthContext'
 import { apiFetch } from './api/client'
 import './App.css'
-
-/**
- * THEORY: Main App Component - Application State & Navigation
- * ===========================================================
- * 
- * React Application Architecture:
- * 
- * 1. COMPONENT HIERARCHY:
- *    App (Root)
- *    ├── Header (Navigation)
- *    ├── Sidebar (Left nav)
- *    └── MainContent
- *        ├── Feed (Home view)
- *        └── Profile (User profile view)
- *
- * 2. STATE MANAGEMENT:
- *    - currentPage: Tracks which view to display (home/profile)
- *    - Modern apps use Context API or Redux for complex state
- *    - This starter uses "lifting state up" pattern
- *
- * 3. COMPONENT COMMUNICATION:
- *    Parent → Child: Props (one-way data flow)
- *    Child → Parent: Callbacks/Event handlers
- *    
- * 4. VIRTUAL DOM CONCEPT:
- *    React creates virtual representation of UI
- *    Compares new vs old virtual DOM (diffing)
- *    Only updates changed elements in real DOM (reconciliation)
- *    This makes apps fast and efficient
- */
 
 function App() {
   const { isAuthenticated, currentUser, checkAuth, hasCheckedAuth } = useAuth()
@@ -54,87 +25,78 @@ function App() {
 
   return (
     <Routes>
-      <Route
-        path="/"
-        element={<Navigate to={isAuthenticated ? '/home' : '/login'} replace />}
-      />
-      <Route
-        path="/login"
-        element={<AuthLanding initialMode="login" />}
-      />
-      <Route
-        path="/signup"
-        element={<AuthLanding initialMode="signup" />}
-      />
+      <Route path="/" element={<Navigate to={isAuthenticated ? '/home' : '/login'} replace />} />
+      <Route path="/login" element={<AuthLanding initialMode="login" />} />
+      <Route path="/signup" element={<AuthLanding initialMode="signup" />} />
       <Route
         path="/home"
         element={(
           <ProtectedRoute>
-            <HomePage currentUser={currentUser} />
+            <ShellPage currentUser={currentUser} currentPage="home" />
           </ProtectedRoute>
         )}
       />
       <Route
-        path="*"
-        element={<Navigate to={isAuthenticated ? '/home' : '/login'} replace />}
+        path="/profile"
+        element={(
+          <ProtectedRoute>
+            <ShellPage currentUser={currentUser} currentPage="profile" />
+          </ProtectedRoute>
+        )}
       />
+      <Route
+        path="/users/:username"
+        element={(
+          <ProtectedRoute>
+            <ShellPage currentUser={currentUser} currentPage="user-profile" />
+          </ProtectedRoute>
+        )}
+      />
+      <Route path="*" element={<Navigate to={isAuthenticated ? '/home' : '/login'} replace />} />
     </Routes>
   )
 }
 
-function HomePage({ currentUser }) {
-  // Navigation state - tracks which page is currently shown
-  const [currentPage, setCurrentPage] = useState('home')
-  const [selectedUsername, setSelectedUsername] = useState('')
-  const [selectedUserData, setSelectedUserData] = useState(null)
+function ShellPage({ currentUser, currentPage }) {
+  const navigate = useNavigate()
 
-  /**
-   * THEORY: Event Handler (Callback)
-   * ================================
-   * This function is passed down to Header component.
-   * When header receives navigation click, it calls this to update parent state.
-   * This demonstrates Parent-Child communication flow.
-   */
   const handleNavigation = (page) => {
-    setCurrentPage(page)
+    if (page === 'profile') {
+      navigate('/profile')
+      return
+    }
+
+    navigate('/home')
   }
 
-  const handleOpenUserProfile = async (username) => {
+  const handleOpenUserProfile = (username) => {
     const normalized = String(username || '').trim().replace(/^@/, '').toLowerCase()
     if (!normalized) return
-
-    try {
-      const data = await apiFetch(`/api/users/${normalized}`)
-      setSelectedUsername(normalized)
-      setSelectedUserData(data)
-      setCurrentPage('user-profile')
-    } catch {
-      // Ignore navigation when profile fetch fails.
-    }
+    navigate(`/users/${normalized}`)
   }
 
   return (
     <div className="app">
       <div className="app-body">
-        {/* Sidebar - left navigation */}
         <Sidebar currentPage={currentPage} currentUser={currentUser} onNavigate={handleNavigation} />
 
-        {/* Main Content Area - changes based on currentPage state */}
-        <main className="main-content">
-          {currentPage === 'home' ? (
-            /* 
-              THEORY: Conditional Rendering
-              ==============================
-              Renders Feed when currentPage is 'home'
-              React only renders the active view, saving performance
-            */
-            <Feed onOpenProfile={handleOpenUserProfile} />
-          ) : currentPage === 'profile' ? (
-            <Profile />
-          ) : currentPage === 'user-profile' && selectedUserData ? (
-            <UserProfileView username={selectedUsername} data={selectedUserData} />
-          ) : null}
-        </main>
+        <div className="main-content">
+          <Header
+            currentUser={currentUser}
+            onNavigate={handleNavigation}
+            onSearchSelectUser={(user) => handleOpenUserProfile(user?.username)}
+          />
+
+          <main>
+            {currentPage === 'home' ? (
+              <Feed onOpenProfile={handleOpenUserProfile} />
+            ) : currentPage === 'profile' ? (
+              <Profile onOpenProfile={handleOpenUserProfile} />
+            ) : (
+              <UserProfileRoute onOpenProfile={handleOpenUserProfile} />
+            )}
+          </main>
+        </div>
 
         {currentPage === 'home' && (
           <aside className="sidebar-right">
@@ -144,19 +106,13 @@ function HomePage({ currentUser }) {
       </div>
 
       <footer className="app-footer">
-        <p>About · Help · Press · API · Jobs · Privacy · Terms · Locations</p>
+        <p>About | Help | Press | API | Jobs | Privacy | Terms | Locations</p>
         <p>Instagram from Meta</p>
       </footer>
     </div>
   )
 }
 
-/**
- * THEORY: Child Component
- * ======================
- * Suggested users sidebar shows accounts to follow.
- * Demonstrates data-driven rendering and reusable component patterns.
- */
 function SuggestedUsers({ currentUser, onOpenProfile }) {
   const [users, setUsers] = useState([])
   const [showAllUsers, setShowAllUsers] = useState(false)
@@ -181,7 +137,7 @@ function SuggestedUsers({ currentUser, onOpenProfile }) {
         {currentUser?.profilePicture ? (
           <img src={currentUser.profilePicture} alt={currentUser.username} className="avatar" />
         ) : (
-          <span className="avatar">👤</span>
+          <span className="avatar">U</span>
         )}
         <div className="user-details">
           <p className="name">@{currentUser?.username || 'you'}</p>
@@ -203,7 +159,7 @@ function SuggestedUsers({ currentUser, onOpenProfile }) {
               {user.profilePicture ? (
                 <img src={user.profilePicture} alt={user.username} className="avatar" />
               ) : (
-                <span className="avatar">👤</span>
+                <span className="avatar">U</span>
               )}
             </button>
             <div className="user-details">
@@ -214,12 +170,47 @@ function SuggestedUsers({ currentUser, onOpenProfile }) {
           <FollowButton userId={user.id} isPrivate={user.isPrivate} />
         </div>
       ))}
-
     </div>
   )
 }
 
-function UserProfileView({ username, data }) {
+function UserProfileRoute({ onOpenProfile }) {
+  const { username } = useParams()
+  const [profileData, setProfileData] = useState(null)
+  const [error, setError] = useState('')
+  const [isLoading, setIsLoading] = useState(true)
+
+  useEffect(() => {
+    const loadProfile = async () => {
+      setIsLoading(true)
+      setError('')
+
+      try {
+        const data = await apiFetch(`/api/users/${encodeURIComponent(username || '')}`)
+        setProfileData(data)
+      } catch (err) {
+        setProfileData(null)
+        setError(err.message || 'Failed to load profile')
+      } finally {
+        setIsLoading(false)
+      }
+    }
+
+    loadProfile()
+  }, [username])
+
+  if (isLoading) {
+    return <div className="profile"><p>Loading profile...</p></div>
+  }
+
+  if (error) {
+    return <div className="profile"><p className="profile-post-error">{error}</p></div>
+  }
+
+  return <UserProfileView username={username} data={profileData} onOpenProfile={onOpenProfile} />
+}
+
+function UserProfileView({ username, data, onOpenProfile }) {
   return (
     <div className="profile">
       <div className="profile-header">
@@ -233,6 +224,10 @@ function UserProfileView({ username, data }) {
         <div className="profile-info">
           <div className="profile-top">
             <h1 className="username">@{username}</h1>
+            <FollowButton userId={data.user?.id} isPrivate={data.user?.isPrivate} />
+            <span className={`privacy-badge ${data.user?.isPrivate ? 'private' : 'public'}`}>
+              {data.user?.isPrivate ? 'Lock Private' : 'Public'}
+            </span>
           </div>
           <div className="profile-stats">
             <div className="stat"><strong>{data.posts?.length || 0}</strong><p>Posts</p></div>
@@ -242,16 +237,31 @@ function UserProfileView({ username, data }) {
           <div className="profile-bio">
             <h2>{data.user?.fullName}</h2>
             <p>{data.user?.bio}</p>
+            {data.user?.website ? (
+              <a
+                href={data.user.website.startsWith('http://') || data.user.website.startsWith('https://')
+                  ? data.user.website
+                  : `https://${data.user.website}`}
+                target="_blank"
+                rel="noreferrer"
+              >
+                {data.user.website}
+              </a>
+            ) : null}
           </div>
         </div>
       </div>
 
       <div className="posts-grid">
-        {(data.posts || []).map(post => (
-          <div key={post.id} className="grid-post">
-            <img src={post.images?.[0]} alt={post.caption} />
-          </div>
-        ))}
+        {data.user?.canViewPosts ? (
+          (data.posts || []).map(post => (
+            <div key={post.id} className="grid-post" onClick={() => onOpenProfile?.(username)}>
+              <img src={post.images?.[0]} alt={post.caption} />
+            </div>
+          ))
+        ) : (
+          <p className="no-posts-message">This account is private. Posts are visible after an accepted follow.</p>
+        )}
       </div>
     </div>
   )
