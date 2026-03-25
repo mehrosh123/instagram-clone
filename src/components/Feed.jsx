@@ -68,6 +68,26 @@ export default function Feed({ onOpenProfile }) {
       .filter(Boolean)
   }
 
+  const mapComment = useCallback((comment) => {
+    const likedByUsers = Array.isArray(comment.likedByUsers)
+      ? comment.likedByUsers
+        .map(user => (typeof user === 'string' ? user : user?.username))
+        .filter(Boolean)
+      : []
+
+    return {
+      id: comment.id,
+      userId: comment.userId,
+      user: comment.author?.username || comment.username || comment.user || 'user',
+      text: comment.text,
+      likes: Number.isFinite(comment.likesCount)
+        ? comment.likesCount
+        : (Number.isFinite(comment.likes) ? comment.likes : 0),
+      liked: !!comment.likedByMe || !!comment.liked,
+      likedByUsers
+    }
+  }, [])
+
   const mapPost = useCallback((post) => {
     const normalizedImages = Array.isArray(post.images)
       ? post.images
@@ -77,15 +97,7 @@ export default function Feed({ onOpenProfile }) {
       : []
 
     const comments = Array.isArray(post.comments)
-      ? post.comments.map(comment => ({
-          id: comment.id,
-          userId: comment.userId,
-          user: comment.author?.username || 'user',
-          text: comment.text,
-          likes: comment.likesCount || 0,
-          liked: !!comment.likedByMe,
-          likedByUsers: (comment.likedByUsers || []).map(user => user.username)
-        }))
+      ? post.comments.map(mapComment)
       : []
 
     return {
@@ -102,10 +114,11 @@ export default function Feed({ onOpenProfile }) {
       likes: Number.isFinite(post.likesCount) ? post.likesCount : 0,
       liked: !!post.likedByMe,
       likedByUsers: (post.likedByUsers || []).map(user => user.username),
+      commentsCount: Number.isFinite(post.commentsCount) ? post.commentsCount : comments.length,
       comments,
       timestamp: post.createdAt ? new Date(post.createdAt).toLocaleString() : 'Just now'
     }
-  }, [])
+  }, [mapComment])
 
   const loadFeed = useCallback(async () => {
     setIsLoading(true)
@@ -141,31 +154,21 @@ export default function Feed({ onOpenProfile }) {
     setPendingLikePostIds(prev => [...prev, postId])
 
     try {
-      if (target.liked) {
-        const data = await apiFetch(`/api/posts/${postId}/like`, { method: 'DELETE' })
-        setPosts(prev => prev.map(post =>
-          post.id === postId
-            ? {
-                ...post,
-                liked: false,
-                likes: data.likesCount,
-                likedByUsers: data.likedByUsers || post.likedByUsers.filter(name => name !== currentUser?.username)
-              }
-            : post
-        ))
-      } else {
-        const data = await apiFetch(`/api/posts/${postId}/like`, { method: 'POST' })
-        setPosts(prev => prev.map(post =>
-          post.id === postId
-            ? {
-                ...post,
-                liked: true,
-                likes: data.likesCount,
-                likedByUsers: data.likedByUsers || Array.from(new Set([...(post.likedByUsers || []), currentUser?.username].filter(Boolean)))
-              }
-            : post
-        ))
-      }
+      const data = await apiFetch(`/api/posts/${postId}/like`, { method: 'POST' })
+      setPosts(prev => prev.map(post =>
+        post.id === postId
+          ? {
+              ...post,
+              liked: !!data.liked,
+              likes: data.likesCount,
+              likedByUsers: data.likedByUsers || (
+                data.liked
+                  ? Array.from(new Set([...(post.likedByUsers || []), currentUser?.username].filter(Boolean)))
+                  : post.likedByUsers.filter(name => name !== currentUser?.username)
+              )
+            }
+          : post
+      ))
     } catch (err) {
       setFeedError(err.message || 'Failed to update like')
       await loadFeed()
@@ -175,7 +178,7 @@ export default function Feed({ onOpenProfile }) {
   }
 
   // Handler for adding comments
-  const handleComment = async (postId, comment) => {
+  const handleComment = useCallback(async (postId, comment) => {
     try {
       const created = await apiFetch(`/api/posts/${postId}/comments`, {
         method: 'POST',
@@ -188,24 +191,19 @@ export default function Feed({ onOpenProfile }) {
               ...post,
               comments: [
                 ...post.comments,
-                {
-                  id: created.id,
-                  userId: currentUser?.id,
-                  user: currentUser?.username || comment.user,
-                  text: created.text
-                }
-              ]
+                mapComment(created)
+              ],
+              commentsCount: post.commentsCount + 1
             }
           : post
       ))
 
-      await loadFeed()
       return true
     } catch (err) {
       setFeedError(err.message)
       return false
     }
-  }
+  }, [mapComment])
 
   const handleEditComment = async (commentId, postId, currentText) => {
     const nextText = window.prompt('Edit comment', currentText)
@@ -244,7 +242,8 @@ export default function Feed({ onOpenProfile }) {
         post.id === postId
           ? {
               ...post,
-              comments: post.comments.filter(comment => comment.id !== commentId)
+              comments: post.comments.filter(comment => comment.id !== commentId),
+              commentsCount: Math.max((post.commentsCount || 0) - 1, 0)
             }
           : post
       ))

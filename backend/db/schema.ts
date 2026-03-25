@@ -35,6 +35,9 @@ export const users = pgTable('users', {
   createdAtIdx: index('idx_users_created_at').on(table.createdAt)
 }))
 
+export type User = typeof users.$inferSelect
+export type NewUser = typeof users.$inferInsert
+
 export const posts = pgTable('posts', {
   id: uuid('id').defaultRandom().primaryKey(),
   userId: uuid('user_id').notNull().references(() => users.id, { onDelete: 'cascade' }),
@@ -50,6 +53,9 @@ export const posts = pgTable('posts', {
   createdAtIdx: index('idx_posts_created_at').on(table.createdAt)
 }))
 
+export type Post = typeof posts.$inferSelect
+export type NewPost = typeof posts.$inferInsert
+
 export const postImages = pgTable('posts_images', {
   id: uuid('id').defaultRandom().primaryKey(),
   postId: uuid('post_id').notNull().references(() => posts.id, { onDelete: 'cascade' }),
@@ -60,6 +66,9 @@ export const postImages = pgTable('posts_images', {
   uniquePostOrder: unique().on(table.postId, table.imageOrder),
   maxTenImages: check('max_10_images', sql`${table.imageOrder} <= 10`)
 }))
+
+export type PostImage = typeof postImages.$inferSelect
+export type NewPostImage = typeof postImages.$inferInsert
 
 export const comments = pgTable('comments', {
   id: uuid('id').defaultRandom().primaryKey(),
@@ -73,6 +82,9 @@ export const comments = pgTable('comments', {
   deletedAt: timestamp('deleted_at', { withTimezone: false })
 })
 
+export type Comment = typeof comments.$inferSelect
+export type NewComment = typeof comments.$inferInsert
+
 export const likes = pgTable('likes', {
   id: uuid('id').defaultRandom().primaryKey(),
   userId: uuid('user_id').notNull().references(() => users.id, { onDelete: 'cascade' }),
@@ -85,6 +97,9 @@ export const likes = pgTable('likes', {
   hasPostOrComment: check('likes_has_target', sql`${table.postId} IS NOT NULL OR ${table.commentId} IS NOT NULL`)
 }))
 
+export type Like = typeof likes.$inferSelect
+export type NewLike = typeof likes.$inferInsert
+
 export const follows = pgTable('follows', {
   id: uuid('id').defaultRandom().primaryKey(),
   followerId: uuid('follower_id').notNull().references(() => users.id, { onDelete: 'cascade' }),
@@ -96,6 +111,9 @@ export const follows = pgTable('follows', {
   noSelfFollow: check('follows_not_self', sql`${table.followerId} <> ${table.followingId}`)
 }))
 
+export type Follow = typeof follows.$inferSelect
+export type NewFollow = typeof follows.$inferInsert
+
 export const stories = pgTable('stories', {
   id: uuid('id').defaultRandom().primaryKey(),
   userId: uuid('user_id').notNull().references(() => users.id, { onDelete: 'cascade' }),
@@ -105,3 +123,6 @@ export const stories = pgTable('stories', {
   storyCreatedIdx: index('idx_stories_created_at').on(table.createdAt),
   storyUserCreatedIdx: index('idx_stories_user_created').on(table.userId, table.createdAt)
 }))
+
+export type Story = typeof stories.$inferSelect
+export type NewStory = typeof stories.$inferInsert

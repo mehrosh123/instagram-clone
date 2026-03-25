@@ -92,6 +92,12 @@
   border-color: var(--border-color);
 }
 
+.follow-btn.friends {
+  background: #ecfdf5;
+  border-color: #a7f3d0;
+  color: #047857;
+}
+
 /* Profile Stats */
 .profile-stats {
   display: grid;
@@ -104,6 +110,19 @@
 
 .stat {
   text-align: left;
+}
+
+.stat-button {
+  appearance: none;
+  background: transparent;
+  border: none;
+  cursor: pointer;
+  padding: 0;
+}
+
+.stat-button.active strong,
+.stat-button.active p {
+  color: var(--primary-color);
 }
 
 .stat strong {
@@ -186,6 +205,11 @@
   margin: 10px 20px 0;
   color: #ff3b30;
   font-size: 13px;
+}
+
+.profile-connections {
+  padding: 20px;
+  background: white;
 }
 
 /* Posts Grid */

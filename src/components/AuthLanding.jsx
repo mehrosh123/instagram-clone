@@ -1,13 +1,12 @@
-import { useEffect, useState } from 'react'
+import { useState } from 'react'
 import { useNavigate } from 'react-router-dom'
 import BrandLogo from './BrandLogo'
 import { useAuth } from '../context/AuthContext'
 import '../styles/AuthLanding.css'
 
 export default function AuthLanding({ initialMode = 'login' }) {
-  const { login, signup, isLoading, error, clearError } = useAuth()
+  const { login, signup, logout, currentUser, isAuthenticated, isLoading, error, clearError } = useAuth()
   const navigate = useNavigate()
-  const [mode, setMode] = useState(initialMode)
   const [loginData, setLoginData] = useState({ email: '', password: '' })
   const [signupData, setSignupData] = useState({
     fullName: '',
@@ -20,15 +19,9 @@ export default function AuthLanding({ initialMode = 'login' }) {
     confirmPassword: ''
   })
   const [localError, setLocalError] = useState('')
-
-  useEffect(() => {
-    setMode(initialMode)
-    setLocalError('')
-    clearError()
-  }, [initialMode, clearError])
+  const mode = initialMode
 
   const switchMode = (nextMode) => {
-    setMode(nextMode)
     setLocalError('')
     clearError()
     navigate(nextMode === 'signup' ? '/signup' : '/login', { replace: true })
@@ -90,6 +83,23 @@ export default function AuthLanding({ initialMode = 'login' }) {
     }
 
     try {
+      const availability = await fetch(
+        `/api/auth/availability?email=${encodeURIComponent(payload.email)}&username=${encodeURIComponent(payload.username)}`,
+        { cache: 'no-store' }
+      )
+
+      if (availability.ok) {
+        const availabilityData = await availability.json()
+        if (!availabilityData.emailAvailable) {
+          setLocalError('Email already exists. Log in with this account instead.')
+          return
+        }
+        if (!availabilityData.usernameAvailable) {
+          setLocalError('Username already exists. Choose a different username.')
+          return
+        }
+      }
+
       await signup(
         payload.email,
         payload.password,
@@ -105,6 +115,12 @@ export default function AuthLanding({ initialMode = 'login' }) {
     } catch {
       // Error message is set by auth context and shown in UI.
     }
+  }
+
+  const handleSwitchAccount = () => {
+    logout()
+    setLocalError('')
+    clearError()
   }
 
   return (
@@ -123,7 +139,18 @@ export default function AuthLanding({ initialMode = 'login' }) {
         <div className="auth-panel-card">
           <BrandLogo compact />
 
-          {mode === 'login' ? (
+          {isAuthenticated ? (
+            <div className="auth-panel-form">
+              <h2>Signed in as @{currentUser?.username || 'user'}</h2>
+              <p>Continue with this account or sign in with a different one.</p>
+              <button type="button" onClick={() => navigate('/home', { replace: true })}>
+                Continue to home
+              </button>
+              <button type="button" onClick={handleSwitchAccount}>
+                Use another account
+              </button>
+            </div>
+          ) : mode === 'login' ? (
             <form className="auth-panel-form" onSubmit={submitLogin}>
               <h2>Log in</h2>
               <input

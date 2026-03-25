@@ -1,22 +1,18 @@
 import { useCallback, useEffect, useState } from 'react'
+import { FollowRequests, FollowersList, FollowingList } from './Followers'
 import { useAuth } from '../context/AuthContext'
 import { apiFetch } from '../api/client'
 import '../styles/Profile.css'
 
-/**
- * THEORY: User Profile Component
- * ===============================
- * Displays user profile information with stats and user's posts.
- * Shows:
- * - User info (name, bio, avatar)
- * - Stats (followers, following, posts)
- * - User's posts grid
- */
-
-export default function Profile() {
+export default function Profile({ onOpenProfile }) {
   const { currentUser, updateCurrentUser } = useAuth()
   const [userPosts, setUserPosts] = useState([])
+  const [followers, setFollowers] = useState([])
+  const [following, setFollowing] = useState([])
+  const [followRequests, setFollowRequests] = useState([])
+  const [activePanel, setActivePanel] = useState('posts')
   const [postActionError, setPostActionError] = useState('')
+  const [relationshipError, setRelationshipError] = useState('')
 
   const isValidImageSource = (value) => {
     if (typeof value !== 'string') return false
@@ -45,7 +41,6 @@ export default function Profile() {
     const raw = String(rawValue || '').trim()
     if (!raw) return []
 
-    // Data URLs contain commas as part of payload; treat as a single image input.
     if (raw.startsWith('data:image/')) {
       return [raw]
     }
@@ -56,45 +51,88 @@ export default function Profile() {
       .filter(Boolean)
   }
 
-  const loadMyPosts = useCallback(async () => {
-    if (!currentUser?.username) {
+  const loadProfileData = useCallback(async () => {
+    if (!currentUser?.id || !currentUser?.username) {
       setUserPosts([])
+      setFollowers([])
+      setFollowing([])
+      setFollowRequests([])
       return
     }
 
-    try {
-      const data = await apiFetch(`/api/users/${currentUser.username}`)
-      const mappedPosts = (data.posts || []).map(post => ({
-        id: post.id,
-        image: Array.isArray(post.images) && post.images.length > 0
-          ? post.images[0]
-          : 'https://images.unsplash.com/photo-1503899036084-c55cdd92da26?w=600&auto=format&fit=crop',
-        images: Array.isArray(post.images) ? post.images : [],
-        caption: post.caption || '',
-        likes: post.likesCount || 0,
-        comments: post.commentsCount || 0
-      }))
-      setUserPosts(mappedPosts)
-    } catch {
-      setUserPosts([])
+    const requestsPromise = currentUser?.isPrivate
+      ? apiFetch(`/api/users/${currentUser.id}/follow-requests`)
+      : Promise.resolve({ requests: [] })
+
+    const [profileData, followersData, followingData, requestsData] = await Promise.all([
+      apiFetch(`/api/users/${currentUser.username}`),
+      apiFetch(`/api/users/${currentUser.id}/followers`),
+      apiFetch(`/api/users/${currentUser.id}/following`),
+      requestsPromise
+    ])
+
+    const mappedPosts = (profileData.posts || []).map(post => ({
+      id: post.id,
+      image: Array.isArray(post.images) && post.images.length > 0
+        ? post.images[0]
+        : 'https://images.unsplash.com/photo-1503899036084-c55cdd92da26?w=600&auto=format&fit=crop',
+      images: Array.isArray(post.images) ? post.images : [],
+      caption: post.caption || '',
+      likes: post.likesCount || 0,
+      comments: post.commentsCount || 0
+    }))
+
+    setUserPosts(mappedPosts)
+    setFollowers(Array.isArray(followersData.followers) ? followersData.followers : [])
+    setFollowing(Array.isArray(followingData.following) ? followingData.following : [])
+    setFollowRequests(Array.isArray(requestsData.requests) ? requestsData.requests : [])
+
+    if (profileData.user) {
+      updateCurrentUser({
+        fullName: profileData.user.fullName,
+        bio: profileData.user.bio,
+        website: profileData.user.website,
+        profilePicture: profileData.user.profilePicture,
+        isPrivate: profileData.user.isPrivate,
+        isVerified: profileData.user.isVerified,
+        followerCount: profileData.user.followerCount ?? 0,
+        followingCount: profileData.user.followingCount ?? 0
+      })
     }
-  }, [currentUser?.username])
+  }, [currentUser, updateCurrentUser])
 
   useEffect(() => {
-    loadMyPosts()
-  }, [loadMyPosts])
+    let active = true
+
+    const run = async () => {
+      try {
+        await loadProfileData()
+      } catch {
+        if (!active) return
+        setUserPosts([])
+        setFollowers([])
+        setFollowing([])
+        setFollowRequests([])
+      }
+    }
+
+    run()
+
+    return () => {
+      active = false
+    }
+  }, [loadProfileData])
 
   const profile = {
     avatar: currentUser?.profilePicture || '',
-    initials: currentUser?.initials || 'SC',
-    name: currentUser?.fullName || 'Sarah Chen',
-    username: currentUser?.username ? `@${currentUser.username}` : '@sarahchen',
+    initials: currentUser?.initials || 'U',
+    name: currentUser?.fullName || 'User',
+    username: currentUser?.username ? `@${currentUser.username}` : '@user',
     bio: currentUser?.bio || '',
-    followers: currentUser?.followerCount ?? 15234,
-    following: currentUser?.followingCount ?? 892,
+    followers: currentUser?.followerCount ?? followers.length,
+    following: currentUser?.followingCount ?? following.length,
     postsCount: userPosts.length,
-    website: currentUser?.website || '',
-    isFollowing: false
+    website: currentUser?.website || ''
   }
 
   const websiteHref = profile.website
@@ -102,12 +140,6 @@ export default function Profile() {
       ? profile.website
       : `https://${profile.website}`)
     : ''
-
-  const [isFollowing, setIsFollowing] = useState(profile.isFollowing)
-
-  const handleFollowClick = () => {
-    setIsFollowing(!isFollowing)
-  }
 
   const handleChangeDisplayPicture = async () => {
     const nextUrl = window.prompt('Enter display picture URL', currentUser?.profilePicture || '')
@@ -120,7 +152,7 @@ export default function Profile() {
       })
       updateCurrentUser({ profilePicture: updated.profilePicture || '' })
     } catch {
-      // Ignore silently for now; existing UI does not include inline alerts.
+      // Existing profile UI keeps update errors inline-light.
     }
   }
 
@@ -152,7 +184,8 @@ export default function Profile() {
           images
         })
       })
-      await loadMyPosts()
+      await loadProfileData()
+      setActivePanel('posts')
     } catch (err) {
       setPostActionError(err.message || 'Failed to create post')
     }
@@ -194,7 +227,7 @@ export default function Profile() {
           images: nextImages
         })
       })
-      await loadMyPosts()
+      await loadProfileData()
     } catch (err) {
       setPostActionError(err.message || 'Failed to edit post')
     }
@@ -207,15 +240,66 @@ export default function Profile() {
     try {
       setPostActionError('')
       await apiFetch(`/api/posts/${postId}`, { method: 'DELETE' })
-      setUserPosts(prev => prev.filter(post => post.id !== postId))
+      await loadProfileData()
     } catch (err) {
       setPostActionError(err.message || 'Failed to delete post')
     }
   }
 
+  const handleRemoveFollower = async (followId) => {
+    if (!followId) return
+    const confirmed = window.confirm('Remove this follower?')
+    if (!confirmed) return
+
+    try {
+      setRelationshipError('')
+      await apiFetch(`/api/follows/${followId}`, { method: 'DELETE' })
+      await loadProfileData()
+    } catch (err) {
+      setRelationshipError(err.message || 'Failed to remove follower')
+    }
+  }
+
+  const handleUnfollow = async (userId) => {
+    if (!userId) return
+    const confirmed = window.confirm('Unfollow this user?')
+    if (!confirmed) return
+
+    try {
+      setRelationshipError('')
+      await apiFetch(`/api/users/${userId}/follow`, { method: 'DELETE' })
+      await loadProfileData()
+    } catch (err) {
+      setRelationshipError(err.message || 'Failed to unfollow user')
+    }
+  }
+
+  const handleApproveRequest = async (followId) => {
+    if (!followId) return
+
+    try {
+      setRelationshipError('')
+      await apiFetch(`/api/follows/${followId}/approve`, { method: 'POST' })
+      await loadProfileData()
+    } catch (err) {
+      setRelationshipError(err.message || 'Failed to approve request')
+    }
+  }
+
+  const handleRejectRequest = async (followId) => {
+    if (!followId) return
+
+    try {
+      setRelationshipError('')
+      await apiFetch(`/api/follows/${followId}/reject`, { method: 'POST' })
+      await loadProfileData()
+    } catch (err) {
+      setRelationshipError(err.message || 'Failed to reject request')
+    }
+  }
+
   return (
     <div className="profile">
-      {/* Profile Header */}
       <div className="profile-header">
         <div className="profile-avatar">
           {profile.avatar ? (
@@ -229,29 +313,22 @@ export default function Profile() {
           <div className="profile-top">
             <h1 className="username">{profile.username}</h1>
             <button className="message-btn" onClick={handleChangeDisplayPicture}>Change photo</button>
-            <button 
-              className={`follow-btn ${isFollowing ? 'following' : ''}`}
-              onClick={handleFollowClick}
-            >
-              {isFollowing ? 'Following' : 'Follow'}
-            </button>
-            <button className="message-btn">Message</button>
-            <button className="menu-btn">⋯</button>
+            <button className="message-btn" onClick={() => loadProfileData()}>Refresh</button>
           </div>
 
           <div className="profile-stats">
-            <div className="stat">
+            <button type="button" className={`stat stat-button ${activePanel === 'posts' ? 'active' : ''}`} onClick={() => setActivePanel('posts')}>
               <strong>{profile.postsCount}</strong>
               <p>Posts</p>
-            </div>
-            <div className="stat">
+            </button>
+            <button type="button" className={`stat stat-button ${activePanel === 'followers' ? 'active' : ''}`} onClick={() => setActivePanel('followers')}>
               <strong>{profile.followers.toLocaleString()}</strong>
               <p>Followers</p>
-            </div>
-            <div className="stat">
+            </button>
+            <button type="button" className={`stat stat-button ${activePanel === 'following' ? 'active' : ''}`} onClick={() => setActivePanel('following')}>
               <strong>{profile.following}</strong>
               <p>Following</p>
-            </div>
+            </button>
           </div>
 
           <div className="profile-bio">
@@ -266,41 +343,59 @@ export default function Profile() {
         </div>
       </div>
 
-      {/* Profile Tabs */}
       <div className="profile-tabs">
-        <button className="tab active">📷 Posts</button>
-        <button className="tab">🎬 Reels</button>
-        <button className="tab">🔖 Saved</button>
-        <button className="tab">👥 Tagged</button>
-        <button className="tab create-post-tab" onClick={handleCreatePost}>＋ Create Post</button>
+        <button className={`tab ${activePanel === 'posts' ? 'active' : ''}`} onClick={() => setActivePanel('posts')}>Posts</button>
+        <button className={`tab ${activePanel === 'followers' ? 'active' : ''}`} onClick={() => setActivePanel('followers')}>Followers</button>
+        <button className={`tab ${activePanel === 'following' ? 'active' : ''}`} onClick={() => setActivePanel('following')}>Following</button>
+        {currentUser?.isPrivate ? (
+          <button className={`tab ${activePanel === 'requests' ? 'active' : ''}`} onClick={() => setActivePanel('requests')}>
+            Requests {followRequests.length > 0 ? `(${followRequests.length})` : ''}
+          </button>
+        ) : null}
+        <button className="tab create-post-tab" onClick={handleCreatePost}>Create Post</button>
       </div>
 
-      {postActionError && <p className="profile-post-error">{postActionError}</p>}
+      {(postActionError || relationshipError) && (
+        <p className="profile-post-error">{postActionError || relationshipError}</p>
+      )}
 
-      {/* Posts Grid */}
-      <div className="posts-grid">
-        {userPosts.map(post => (
-          <div key={post.id} className="grid-post">
-            <img src={post.image} alt={`Post ${post.id}`} />
-            <div className="post-overlay">
-              <div className="post-overlay-content">
-                <div className="post-stats">
-                  <span>❤️ {post.likes}</span>
-                  <span>💬 {post.comments}</span>
-                </div>
-                <div className="profile-post-actions">
-                  <button onClick={() => handleEditPost(post)}>Edit</button>
-                  <button className="danger" onClick={() => handleDeletePost(post.id)}>Delete</button>
+      {activePanel === 'followers' ? (
+        <div className="profile-connections">
+          <FollowersList followers={followers} onRemove={handleRemoveFollower} onOpenProfile={onOpenProfile} />
+        </div>
+      ) : activePanel === 'following' ? (
+        <div className="profile-connections">
+          <FollowingList following={following} onUnfollow={handleUnfollow} onOpenProfile={onOpenProfile} />
+        </div>
+      ) : activePanel === 'requests' ? (
+        <div className="profile-connections">
+          <FollowRequests requests={followRequests} onApprove={handleApproveRequest} onReject={handleRejectRequest} />
+        </div>
+      ) : (
+        <div className="posts-grid">
+          {userPosts.map(post => (
+            <div key={post.id} className="grid-post">
+              <img src={post.image} alt={`Post ${post.id}`} />
+              <div className="post-overlay">
+                <div className="post-overlay-content">
+                  <div className="post-stats">
+                    <span>❤️ {post.likes}</span>
+                    <span>💬 {post.comments}</span>
+                  </div>
+                  <div className="profile-post-actions">
+                    <button onClick={() => handleEditPost(post)}>Edit</button>
+                    <button className="danger" onClick={() => handleDeletePost(post.id)}>Delete</button>
+                  </div>
                 </div>
               </div>
             </div>
-          </div>
-        ))}
+          ))}
 
-        {userPosts.length === 0 && (
-          <p className="no-posts-message">No posts yet. Create your first post.</p>
-        )}
-      </div>
+          {userPosts.length === 0 && (
+            <p className="no-posts-message">No posts yet. Create your first post.</p>
+          )}
+        </div>
+      )}
     </div>
   )
 }
