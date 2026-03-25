@@ -142,11 +142,13 @@ function toApiUserFromDb(user, followStats = null) {
     id: user.id,
     email: user.email,
     username: user.username,
+    profilePath: `/users/${user.username}`,
     fullName: user.fullName || '',
     bio: user.bio || '',
     website: user.website || '',
     profilePicture: user.profilePictureUrl || user.profilePicture || '',
     isPrivate: !!user.isPrivate,
+    accountVisibilityLabel: user.isPrivate ? 'Private' : 'Public',
     isVerified: !!user.isVerified,
     followerCount: Number(followStats?.followerCount ?? user.followerCount ?? 0),
     followingCount: Number(followStats?.followingCount ?? user.followingCount ?? 0),
@@ -288,6 +290,127 @@ function issueToken(userId) {
   return jwt.sign({ sub: userId }, JWT_SECRET, { expiresIn: '7d' })
 }
 
+function extractQueryRows(result) {
+  if (Array.isArray(result)) return result
+  if (Array.isArray(result?.rows)) return result.rows
+  return []
+}
+
+let pgTrgmAvailabilityPromise = null
+
+async function hasPgTrgmExtension() {
+  if (!USE_POSTGRES_RUNTIME || !db) return false
+
+  if (!pgTrgmAvailabilityPromise) {
+    pgTrgmAvailabilityPromise = db.execute(sql`
+      select exists (
+        select 1
+        from pg_extension
+        where extname = 'pg_trgm'
+      ) as installed
+    `)
+      .then(result => {
+        const row = extractQueryRows(result)[0]
+        return Boolean(row?.installed)
+      })
+      .catch(() => false)
+  }
+
+  return pgTrgmAvailabilityPromise
+}
+
+async function searchUsersInDb(query) {
+  const normalizedQuery = String(query || '').trim().toLowerCase()
+  const likePattern = `%${normalizedQuery}%`
+  const canUsePgTrgm = await hasPgTrgmExtension()
+
+  if (canUsePgTrgm) {
+    const queryResult = await db.execute(sql`
+      SELECT
+        id,
+        email,
+        username,
+        password_hash AS "passwordHash",
+        full_name AS "fullName",
+        bio,
+        website,
+        profile_picture_url AS "profilePictureUrl",
+        is_private AS "isPrivate",
+        is_verified AS "isVerified",
+        follower_count AS "followerCount",
+        following_count AS "followingCount",
+        created_at AS "createdAt",
+        updated_at AS "updatedAt",
+        deleted_at AS "deletedAt",
+        (
+          ts_rank(
+            to_tsvector('simple', coalesce(username, '') || ' ' || coalesce(full_name, '')),
+            plainto_tsquery('simple', ${normalizedQuery})
+          ) +
+          greatest(
+            similarity(lower(username), lower(${normalizedQuery})),
+            similarity(lower(full_name), lower(${normalizedQuery}))
+          )
+        ) AS score
+      FROM users
+      WHERE deleted_at IS NULL
+        AND (
+          to_tsvector('simple', coalesce(username, '') || ' ' || coalesce(full_name, '')) @@ plainto_tsquery('simple', ${normalizedQuery})
+          OR lower(username) % lower(${normalizedQuery})
+          OR lower(full_name) % lower(${normalizedQuery})
+          OR lower(username) ILIKE lower(${likePattern})
+          OR lower(full_name) ILIKE lower(${likePattern})
+        )
+      ORDER BY score DESC, username ASC
+      LIMIT 20
+    `)
+
+    return extractQueryRows(queryResult)
+  }
+
+  const queryResult = await db.execute(sql`
+    SELECT
+      id,
+      email,
+      username,
+      password_hash AS "passwordHash",
+      full_name AS "fullName",
+      bio,
+      website,
+      profile_picture_url AS "profilePictureUrl",
+      is_private AS "isPrivate",
+      is_verified AS "isVerified",
+      follower_count AS "followerCount",
+      following_count AS "followingCount",
+      created_at AS "createdAt",
+      updated_at AS "updatedAt",
+      deleted_at AS "deletedAt",
+      (
+        ts_rank(
+          to_tsvector('simple', coalesce(username, '') || ' ' || coalesce(full_name, '')),
+          plainto_tsquery('simple', ${normalizedQuery})
+        ) +
+        CASE
+          WHEN lower(username) = lower(${normalizedQuery}) THEN 3
+          WHEN lower(username) LIKE lower(${`${normalizedQuery}%`}) THEN 2
+          WHEN lower(full_name) LIKE lower(${`${normalizedQuery}%`}) THEN 1
+          ELSE 0
+        END
+      ) AS score
+    FROM users
+    WHERE deleted_at IS NULL
+      AND (
+        to_tsvector('simple', coalesce(username, '') || ' ' || coalesce(full_name, '')) @@ plainto_tsquery('simple', ${normalizedQuery})
+        OR lower(username) ILIKE lower(${likePattern})
+        OR lower(full_name) ILIKE lower(${likePattern})
+      )
+    ORDER BY score DESC, username ASC
+    LIMIT 20
+  `)
+
+  return extractQueryRows(queryResult)
+}
+
 function isUuid(value) {
   return /^[0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i.test(String(value || ''))
 }
@@ -413,6 +536,50 @@ app.get('/api/health', async (_req, res) => {
     databaseMessage: dbStatus.message,
     storageMode: USE_POSTGRES_RUNTIME ? 'postgres' : 'json-file',
     usersTable
+  })
+})
+
+app.get('/api/auth/availability', async (req, res) => {
+  const email = String(req.query.email || '').trim().toLowerCase()
+  const username = String(req.query.username || '').trim().toLowerCase().replace(/^@/, '')
+
+  if (!email && !username) {
+    return res.json({
+      emailAvailable: true,
+      usernameAvailable: true
+    })
+  }
+
+  if (USE_POSTGRES_RUNTIME && db) {
+    try {
+      const filters = []
+      if (email) filters.push(eq(users.email, email))
+      if (username) filters.push(eq(users.username, username))
+
+      const existingUsers = filters.length > 0
+        ? await db
+          .select({
+            email: users.email,
+            username: users.username
+          })
+          .from(users)
+          .where(and(isNull(users.deletedAt), or(...filters)))
+        : []
+
+      return res.json({
+        emailAvailable: email ? !existingUsers.some(user => user.email === email) : true,
+        usernameAvailable: username ? !existingUsers.some(user => user.username === username) : true
+      })
+    } catch (err) {
+      console.error('Availability check DB error:', err)
+      return res.status(500).json({ error: 'Failed to validate signup availability' })
+    }
+  }
+
+  const dbState = readDb()
+  return res.json({
+    emailAvailable: email ? !dbState.users.some(user => String(user?.email || '').toLowerCase() === email) : true,
+    usernameAvailable: username ? !dbState.users.some(user => String(user?.username || '').toLowerCase() === username) : true
   })
 })
 
@@ -1845,11 +2012,11 @@ app.get('/api/users/:id/follow-status', authRequired, async (req, res) => {
         .limit(1)
       const target = targetRows[0]
       if (!target) {
-        return res.json({ status: 'none', isFollowing: false, isPending: false })
+        return res.json({ status: 'none', isFollowing: false, isPending: false, followsMe: false, isMutual: false })
       }
 
       if (target.id === req.userId) {
-        return res.json({ status: 'self', isFollowing: false, isPending: false })
+        return res.json({ status: 'self', isFollowing: false, isPending: false, followsMe: false, isMutual: false })
       }
 
       const rel = await db
@@ -1857,11 +2024,18 @@ app.get('/api/users/:id/follow-status', authRequired, async (req, res) => {
         .from(follows)
         .where(and(eq(follows.followerId, req.userId), eq(follows.followingId, target.id)))
         .limit(1)
+      const reverseRel = await db
+        .select()
+        .from(follows)
+        .where(and(eq(follows.followerId, target.id), eq(follows.followingId, req.userId), eq(follows.status, 'accepted')))
+        .limit(1)
       const status = rel[0]?.status || 'none'
       return res.json({
         status,
         isFollowing: status === 'accepted',
-        isPending: status === 'pending'
+        isPending: status === 'pending',
+        followsMe: reverseRel.length > 0,
+        isMutual: status === 'accepted' && reverseRel.length > 0
       })
     } catch (err) {
       console.error('Follow status DB error:', err)
@@ -1872,22 +2046,27 @@ app.get('/api/users/:id/follow-status', authRequired, async (req, res) => {
   const dbState = readDb()
   const target = dbState.users.find(u => u.id === req.params.id)
   if (!target) {
-    return res.json({ status: 'none', isFollowing: false, isPending: false })
+    return res.json({ status: 'none', isFollowing: false, isPending: false, followsMe: false, isMutual: false })
   }
 
   if (target.id === req.userId) {
-    return res.json({ status: 'self', isFollowing: false, isPending: false })
+    return res.json({ status: 'self', isFollowing: false, isPending: false, followsMe: false, isMutual: false })
   }
 
   const relationship = dbState.follows.find(
     f => f.followerId === req.userId && f.followingId === target.id
+  )
+  const reverseRelationship = dbState.follows.find(
+    f => f.followerId === target.id && f.followingId === req.userId && f.status === 'accepted'
   )
 
   const status = relationship?.status || 'none'
   return res.json({
     status,
     isFollowing: status === 'accepted',
-    isPending: status === 'pending'
+    isPending: status === 'pending',
+    followsMe: !!reverseRelationship,
+    isMutual: status === 'accepted' && !!reverseRelationship
   })
 })
 
@@ -1953,6 +2132,10 @@ app.delete('/api/follows/:id', authRequired, async (req, res) => {
       }
 
       await db.delete(follows).where(eq(follows.id, follow.id))
+      if (follow.status === 'accepted') {
+        await db.update(users).set({ followingCount: sql`greatest(${users.followingCount} - 1, 0)` }).where(eq(users.id, follow.followerId))
+        await db.update(users).set({ followerCount: sql`greatest(${users.followerCount} - 1, 0)` }).where(eq(users.id, follow.followingId))
+      }
       return res.status(204).send()
     } catch (err) {
       console.error('Delete follow DB error:', err)
@@ -2003,6 +2186,9 @@ app.post('/api/follows/:id/approve', authRequired, async (req, res) => {
         .set({ status: 'accepted' })
         .where(eq(follows.id, follow.id))
         .returning()
+
+      await db.update(users).set({ followingCount: sql`${users.followingCount} + 1` }).where(eq(users.id, follow.followerId))
+      await db.update(users).set({ followerCount: sql`${users.followerCount} + 1` }).where(eq(users.id, follow.followingId))
 
       return res.json(updatedRows[0])
     } catch (err) {
@@ -2225,14 +2411,7 @@ app.get('/api/users/search', authRequired, async (req, res) => {
 
   if (USE_POSTGRES_RUNTIME && db) {
     try {
-      const rows = await db
-        .select()
-        .from(users)
-        .where(and(
-          isNull(users.deletedAt),
-          sql`(lower(${users.username}) like ${`%${q}%`} or lower(${users.fullName}) like ${`%${q}%`})`
-        ))
-        .limit(20)
+      const rows = await searchUsersInDb(q)
 
       const statsMap = await getFollowStatsMapFromDb(rows.map(user => user.id))
       return res.json({ users: attachFollowStats(rows, statsMap) })
@@ -2263,28 +2442,40 @@ app.get('/api/users/:username', authRequired, async (req, res) => {
       const user = userRows[0]
       if (!user) return res.status(404).json({ error: 'User not found' })
 
-      let canView = !user.isPrivate || user.id === req.userId
-      if (!canView) {
+      let canViewPosts = !user.isPrivate || user.id === req.userId
+      let relationshipStatus = user.id === req.userId ? 'self' : 'none'
+      let followsMe = false
+      if (user.id !== req.userId) {
         const rel = await db
           .select()
           .from(follows)
           .where(and(
             eq(follows.followerId, req.userId),
-            eq(follows.followingId, user.id),
+            eq(follows.followingId, user.id)
+          ))
+          .limit(1)
+        relationshipStatus = rel[0]?.status || 'none'
+        canViewPosts = !user.isPrivate || relationshipStatus === 'accepted'
+
+        const reverseRel = await db
+          .select()
+          .from(follows)
+          .where(and(
+            eq(follows.followerId, user.id),
+            eq(follows.followingId, req.userId),
             eq(follows.status, 'accepted')
           ))
           .limit(1)
-        canView = rel.length > 0
-      }
-      if (!canView) {
-        return res.status(403).json({ error: 'This account is private' })
+        followsMe = reverseRel.length > 0
       }
 
-      const postRows = await db
-        .select()
-        .from(posts)
-        .where(and(eq(posts.userId, user.id), isNull(posts.deletedAt)))
-        .orderBy(desc(posts.createdAt))
+      const postRows = canViewPosts
+        ? await db
+          .select()
+          .from(posts)
+          .where(and(eq(posts.userId, user.id), isNull(posts.deletedAt)))
+          .orderBy(desc(posts.createdAt))
+        : []
 
       const postIds = postRows.map(post => post.id)
       const imageRows = postIds.length > 0
@@ -2302,7 +2493,16 @@ app.get('/api/users/:username', authRequired, async (req, res) => {
 
       const payloadPosts = postRows.map(post => toApiPostFromDb(post, imagesByPost.get(post.id) || []))
       const statsMap = await getFollowStatsMapFromDb([user.id])
-      return res.json({ user: toApiUserFromDb(user, statsMap.get(user.id)), posts: payloadPosts })
+      return res.json({
+        user: {
+          ...toApiUserFromDb(user, statsMap.get(user.id)),
+          relationshipStatus,
+          followsMe,
+          isMutual: relationshipStatus === 'accepted' && followsMe,
+          canViewPosts
+        },
+        posts: payloadPosts
+      })
     } catch (err) {
       console.error('User profile DB error:', err)
       return sendDatabaseError(res, 'Failed to load user profile', err)
@@ -2314,17 +2514,32 @@ app.get('/api/users/:username', authRequired, async (req, res) => {
   const user = dbState.users.find(u => u.username === username)
   if (!user) return res.status(404).json({ error: 'User not found' })
 
-  const canView = canViewUserContent(req.userId, user, dbState)
-  if (!canView) {
-    return res.status(403).json({ error: 'This account is private' })
-  }
+  const relationship = dbState.follows.find(
+    follow => follow.followerId === req.userId && follow.followingId === user.id
+  )
+  const reverseRelationship = dbState.follows.find(
+    follow => follow.followerId === user.id && follow.followingId === req.userId && follow.status === 'accepted'
+  )
+  const relationshipStatus = user.id === req.userId ? 'self' : (relationship?.status || 'none')
+  const canViewPosts = canViewUserContent(req.userId, user, dbState)
 
-  const userPosts = dbState.posts
-    .filter(p => p.userId === user.id && !p.deletedAt)
-    .sort((a, b) => new Date(b.createdAt) - new Date(a.createdAt))
+  const userPosts = canViewPosts
+    ? dbState.posts
+      .filter(p => p.userId === user.id && !p.deletedAt)
+      .sort((a, b) => new Date(b.createdAt) - new Date(a.createdAt))
+    : []
 
   const statsMap = getFollowStatsMapFromJson([user.id], dbState)
-  res.json({ user: toApiUserFromDb(user, statsMap.get(user.id)), posts: userPosts })
+  res.json({
+    user: {
+      ...toApiUserFromDb(user, statsMap.get(user.id)),
+      relationshipStatus,
+      followsMe: !!reverseRelationship,
+      isMutual: relationshipStatus === 'accepted' && !!reverseRelationship,
+      canViewPosts
+    },
+    posts: userPosts
+  })
 })
 
 app.put('/api/users/:id', authRequired, async (req, res) => {

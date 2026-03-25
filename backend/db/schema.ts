@@ -3,6 +3,7 @@ import {
   check,
   index,
   integer,
+  pgEnum,
   pgTable,
   text,
   timestamp,
@@ -11,6 +12,8 @@ import {
   varchar
 } from 'drizzle-orm/pg-core'
 import { sql } from 'drizzle-orm'
+
+export const followStatusEnum = pgEnum('follow_status', ['pending', 'accepted'])
 
 export const users = pgTable('users', {
   id: uuid('id').defaultRandom().primaryKey(),
@@ -101,7 +104,7 @@ export const follows = pgTable('follows', {
   id: uuid('id').defaultRandom().primaryKey(),
   followerId: uuid('follower_id').notNull().references(() => users.id, { onDelete: 'cascade' }),
   followingId: uuid('following_id').notNull().references(() => users.id, { onDelete: 'cascade' }),
-  status: varchar('status', { length: 20 }).default('accepted').notNull(),
+  status: followStatusEnum('status').default('accepted').notNull(),
   createdAt: timestamp('created_at', { withTimezone: false }).defaultNow().notNull()
 }, (table) => ({
   uniqueFollowPair: unique().on(table.followerId, table.followingId),

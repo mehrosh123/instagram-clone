@@ -3,6 +3,12 @@
 
 CREATE EXTENSION IF NOT EXISTS pgcrypto;
 CREATE EXTENSION IF NOT EXISTS pg_trgm;
+DO $$
+BEGIN
+  IF NOT EXISTS (SELECT 1 FROM pg_type WHERE typname = 'follow_status') THEN
+    CREATE TYPE follow_status AS ENUM ('pending', 'accepted');
+  END IF;
+END $$;
 
 CREATE TABLE users (
   id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
@@ -23,11 +29,11 @@ CREATE TABLE users (
 );
 
 CREATE INDEX idx_users_created_at ON users(created_at DESC);
+CREATE INDEX idx_users_username_lower_trgm ON users USING GIN (lower(username) gin_trgm_ops);
+CREATE INDEX idx_users_full_name_lower_trgm ON users USING GIN (lower(full_name) gin_trgm_ops);
 CREATE INDEX idx_users_search_tsv ON users USING GIN (
-  to_tsvector('english', username || ' ' || full_name)
+  to_tsvector('simple', coalesce(username, '') || ' ' || coalesce(full_name, ''))
 );
-CREATE INDEX idx_users_username_trgm ON users USING GIN (username gin_trgm_ops);
-CREATE INDEX idx_users_full_name_trgm ON users USING GIN (full_name gin_trgm_ops);
 
 CREATE TABLE posts (
   id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
@@ -81,7 +87,7 @@ CREATE TABLE follows (
   id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
   follower_id UUID NOT NULL REFERENCES users(id) ON DELETE CASCADE,
   following_id UUID NOT NULL REFERENCES users(id) ON DELETE CASCADE,
-  status VARCHAR(20) NOT NULL DEFAULT 'accepted',
+  status follow_status NOT NULL DEFAULT 'accepted',
   created_at TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP,
   UNIQUE (follower_id, following_id),
   CHECK (follower_id <> following_id)
