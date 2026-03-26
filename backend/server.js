@@ -23,7 +23,7 @@ const JWT_SECRET = process.env.JWT_SECRET || 'demo-secret-change-in-production'
 const USE_POSTGRES_RUNTIME = hasDatabaseUrl && String(process.env.USE_POSTGRES_RUNTIME || 'true').toLowerCase() !== 'false'
 const IS_PRODUCTION = process.env.NODE_ENV === 'production'
 const ALLOWED_ORIGINS = String(
-  process.env.FRONTEND_URLS || 'http://localhost:5173,https://instagram-clone-iota-six.vercel.app'
+  process.env.FRONTEND_URLS || 'http://localhost:5173,https://instagram-clone-iota-six.vercel.app,https://instagram-clone-git-main-myproject5.vercel.app'
 )
   .split(',')
   .map(origin => origin.trim())
