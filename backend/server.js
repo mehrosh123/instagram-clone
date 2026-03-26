@@ -22,12 +22,24 @@ const PORT = process.env.PORT || 4000
 const JWT_SECRET = process.env.JWT_SECRET || 'demo-secret-change-in-production'
 const USE_POSTGRES_RUNTIME = hasDatabaseUrl && String(process.env.USE_POSTGRES_RUNTIME || 'true').toLowerCase() !== 'false'
 const IS_PRODUCTION = process.env.NODE_ENV === 'production'
+const ALLOWED_ORIGINS = String(process.env.FRONTEND_URLS || 'http://localhost:5173')
+  .split(',')
+  .map(origin => origin.trim())
+  .filter(Boolean)
 const __filename = fileURLToPath(import.meta.url)
 const __dirname = path.dirname(__filename)
 const DATA_FILE = path.join(__dirname, 'data.json')
 const STORY_TTL_MS = 24 * 60 * 60 * 1000
 
-app.use(cors({ origin: ['http://localhost:5173'], credentials: true }))
+app.use(cors({
+  origin(origin, callback) {
+    if (!origin || ALLOWED_ORIGINS.includes(origin)) {
+      return callback(null, true)
+    }
+    return callback(new Error(`Origin ${origin} is not allowed by CORS`))
+  },
+  credentials: true
+}))
 app.use(express.json({ limit: '10mb' }))
 app.use(express.urlencoded({ extended: true, limit: '10mb' }))
 app.use((_req, res, next) => {
