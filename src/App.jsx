@@ -8,7 +8,7 @@ import AuthLanding from './components/AuthLanding'
 import ProtectedRoute from './components/ProtectedRoute'
 import SplashScreen from './components/SplashScreen'
 import FollowButton from './components/Followers'
-import { useAuth } from './context/AuthContext'
+import { useAuth } from './context/useAuth'
 import { apiFetch } from './api/client'
 import './App.css'
 

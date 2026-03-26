@@ -1,7 +1,8 @@
 import { useState } from 'react'
 import { useNavigate } from 'react-router-dom'
 import BrandLogo from './BrandLogo'
-import { useAuth } from '../context/AuthContext'
+import { useAuth } from '../context/useAuth'
+import { apiFetch } from '../api/client'
 import '../styles/AuthLanding.css'
 
 export default function AuthLanding({ initialMode = 'login' }) {
@@ -83,21 +84,16 @@ export default function AuthLanding({ initialMode = 'login' }) {
     }
 
     try {
-      const availability = await fetch(
-        `/api/auth/availability?email=${encodeURIComponent(payload.email)}&username=${encodeURIComponent(payload.username)}`,
-        { cache: 'no-store' }
+      const availabilityData = await apiFetch(
+        `/api/auth/availability?email=${encodeURIComponent(payload.email)}&username=${encodeURIComponent(payload.username)}`
       )
-
-      if (availability.ok) {
-        const availabilityData = await availability.json()
-        if (!availabilityData.emailAvailable) {
-          setLocalError('Email already exists. Log in with this account instead.')
-          return
-        }
-        if (!availabilityData.usernameAvailable) {
-          setLocalError('Username already exists. Choose a different username.')
-          return
-        }
+      if (!availabilityData.emailAvailable) {
+        setLocalError('Email already exists. Log in with this account instead.')
+        return
+      }
+      if (!availabilityData.usernameAvailable) {
+        setLocalError('Username already exists. Choose a different username.')
+        return
       }
 
       await signup(

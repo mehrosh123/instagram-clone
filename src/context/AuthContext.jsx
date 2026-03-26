@@ -1,4 +1,6 @@
-import { createContext, useContext, useState, useCallback } from 'react'
+import { useState, useCallback } from 'react'
+import { apiFetch } from '../api/client'
+import AuthContext from './auth-context'
 
 const STORAGE_KEYS = {
   token: 'auth_token',
@@ -59,8 +61,6 @@ function getStoredToken() {
  * - Tracks follow/unfollow relationships
  */
 
-const AuthContext = createContext(null)
-
 /**
  * THEORY: Provider Pattern
  * ========================
@@ -111,10 +111,8 @@ export function AuthProvider({ children }) {
     setIsLoading(true)
     setError(null)
     try {
-      const response = await fetch('/api/auth/signup', {
+      const data = await apiFetch('/api/auth/signup', {
         method: 'POST',
-        cache: 'no-store',
-        headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({
           email,
           password,
@@ -126,19 +124,6 @@ export function AuthProvider({ children }) {
           isPrivate: !!profileMeta.isPrivate
         })
       })
-
-      if (!response.ok) {
-        let message = 'Signup failed'
-        try {
-          const payload = await response.json()
-          message = payload.error || message
-        } catch {
-          // Keep default message when response body is not JSON.
-        }
-        throw new Error(message)
-      }
-
-      const data = await response.json()
       storeAuthSession(data.token)
       const user = buildUserWithInitials(data.user)
       setCurrentUser(user)
@@ -159,25 +144,10 @@ export function AuthProvider({ children }) {
     setIsLoading(true)
     setError(null)
     try {
-      const response = await fetch('/api/auth/login', {
+      const data = await apiFetch('/api/auth/login', {
         method: 'POST',
-        cache: 'no-store',
-        headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ email, password })
       })
-
-      if (!response.ok) {
-        let message = 'Invalid email or password'
-        try {
-          const payload = await response.json()
-          message = payload.error || message
-        } catch {
-          // Keep default message when response body is not JSON.
-        }
-        throw new Error(message)
-      }
-
-      const data = await response.json()
       storeAuthSession(data.token)
       const user = buildUserWithInitials(data.user)
       setCurrentUser(user)
@@ -225,19 +195,9 @@ export function AuthProvider({ children }) {
     }
 
     try {
-      const response = await fetch('/api/auth/me', {
-        cache: 'no-store',
+      const user = await apiFetch('/api/auth/me', {
         headers: { Authorization: `Bearer ${token}` }
       })
-
-      if (!response.ok) {
-        clearAuthSession()
-        setCurrentUser(null)
-        setHasCheckedAuth(true)
-        return
-      }
-
-      const user = await response.json()
       storeAuthSession(token)
       setCurrentUser(buildUserWithInitials(user))
       setHasCheckedAuth(true)
@@ -269,17 +229,3 @@ export function AuthProvider({ children }) {
   )
 }
 
-/**
- * THEORY: Custom Hook
- * ===================
- * Custom hooks encapsulate logic and state
- * Can only be used inside components
- * Promotes code reuse and organization
- */
-export function useAuth() {
-  const context = useContext(AuthContext)
-  if (!context) {
-    throw new Error('useAuth must be used within AuthProvider')
-  }
-  return context
-}

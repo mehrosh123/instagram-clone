@@ -1,5 +1,5 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
-import { useAuth } from '../context/AuthContext'
+import { useAuth } from '../context/useAuth'
 import { apiFetch } from '../api/client'
 import { uploadImageToCloudinary } from '../utils/cloudinary'
 import '../styles/Stories.css'

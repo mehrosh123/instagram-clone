@@ -1,6 +1,6 @@
 import Search from './Search'
 import BrandLogo from './BrandLogo'
-import { useAuth } from '../context/AuthContext'
+import { useAuth } from '../context/useAuth'
 import '../styles/Header.css'
 
 export default function Header({ onNavigate, currentUser, onSearchSelectUser }) {

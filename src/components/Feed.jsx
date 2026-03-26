@@ -2,7 +2,7 @@ import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
 import Post from './Post'
 import Stories from './Stories'
 import { apiFetch } from '../api/client'
-import { useAuth } from '../context/AuthContext'
+import { useAuth } from '../context/useAuth'
 import '../styles/Feed.css'
 
 /**

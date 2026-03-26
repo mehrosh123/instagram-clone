@@ -1,6 +1,6 @@
 import { Navigate, useLocation } from 'react-router-dom'
 import { getAuthToken } from '../api/client'
-import { useAuth } from '../context/AuthContext'
+import { useAuth } from '../context/useAuth'
 import SplashScreen from './SplashScreen'
 
 export default function ProtectedRoute({ children }) {

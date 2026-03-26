@@ -1,4 +1,23 @@
 const TOKEN_KEYS = ['auth_token', 'token']
+const RAW_API_BASE_URL = String(import.meta.env.VITE_API_URL || '').trim()
+const API_BASE_URL = RAW_API_BASE_URL.replace(/\/+$/, '')
+
+export function buildApiUrl(url) {
+  const normalizedUrl = String(url || '')
+  if (/^https?:\/\//i.test(normalizedUrl)) {
+    return normalizedUrl
+  }
+
+  if (!API_BASE_URL) {
+    return normalizedUrl
+  }
+
+  if (normalizedUrl.startsWith('/')) {
+    return `${API_BASE_URL}${normalizedUrl}`
+  }
+
+  return `${API_BASE_URL}/${normalizedUrl}`
+}
 
 export function getAuthToken() {
   for (const key of TOKEN_KEYS) {
@@ -21,7 +40,7 @@ export async function apiFetch(url, options = {}) {
     headers.Authorization = `Bearer ${token}`
   }
 
-  const response = await fetch(url, {
+  const response = await fetch(buildApiUrl(url), {
     ...options,
     cache: 'no-store',
     headers

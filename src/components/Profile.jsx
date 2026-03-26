@@ -1,6 +1,6 @@
 import { useCallback, useEffect, useState } from 'react'
 import { FollowRequests, FollowersList, FollowingList } from './Followers'
-import { useAuth } from '../context/AuthContext'
+import { useAuth } from '../context/useAuth'
 import { apiFetch } from '../api/client'
 import '../styles/Profile.css'
 
