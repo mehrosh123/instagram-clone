@@ -2,6 +2,14 @@ export async function uploadImageToCloudinary(file) {
   const cloudName = import.meta.env.VITE_CLOUDINARY_CLOUD_NAME
   const uploadPreset = import.meta.env.VITE_CLOUDINARY_UPLOAD_PRESET
 
+  console.log('Cloudinary env', {
+    cloudName,
+    uploadPreset,
+    fileName: file?.name,
+    fileType: file?.type,
+    fileSize: file?.size
+  })
+
   if (!cloudName || !uploadPreset) {
     throw new Error('Missing Cloudinary config: VITE_CLOUDINARY_CLOUD_NAME and VITE_CLOUDINARY_UPLOAD_PRESET')
   }
@@ -15,11 +23,24 @@ export async function uploadImageToCloudinary(file) {
     body: form
   })
 
-  if (!response.ok) {
-    throw new Error('Cloudinary upload failed')
+  let payload = null
+  try {
+    payload = await response.json()
+  } catch {
+    payload = null
   }
 
-  const payload = await response.json()
+  console.log('Cloudinary upload response', {
+    ok: response.ok,
+    status: response.status,
+    statusText: response.statusText,
+    payload
+  })
+
+  if (!response.ok) {
+    throw new Error(payload?.error?.message || 'Cloudinary upload failed')
+  }
+
   if (!payload.secure_url) {
     throw new Error('Cloudinary did not return secure_url')
   }

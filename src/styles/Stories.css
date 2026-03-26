@@ -38,6 +38,65 @@
   margin-bottom: 12px;
 }
 
+.story-upload-form {
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+  margin-bottom: 12px;
+}
+
+.story-upload-row {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  flex-wrap: wrap;
+}
+
+.story-upload-row-secondary {
+  align-items: stretch;
+}
+
+.story-select-btn,
+.story-upload-btn,
+.story-submit-btn {
+  min-height: 42px;
+  border-radius: 999px;
+  padding: 0 16px;
+  font-size: 13px;
+  font-weight: 600;
+}
+
+.story-select-btn {
+  border: 1px solid var(--border-color);
+  background: #fff;
+  color: var(--text-color);
+}
+
+.story-upload-btn,
+.story-submit-btn {
+  background: var(--primary-color);
+  color: #fff;
+}
+
+.story-select-btn:disabled,
+.story-upload-btn:disabled,
+.story-submit-btn:disabled {
+  opacity: 0.6;
+  cursor: not-allowed;
+}
+
+.story-file-name {
+  min-height: 24px;
+  color: #666;
+  font-size: 13px;
+}
+
+.story-helper-text {
+  margin: 0;
+  font-size: 12px;
+  color: #666;
+}
+
 .story-url-input {
   flex: 1;
   min-width: 0;
@@ -320,6 +379,10 @@
 
   .story-create {
     flex-direction: column;
+    align-items: stretch;
+  }
+
+  .story-upload-row {
     align-items: stretch;
   }
 

@@ -145,20 +145,22 @@ export default function Stories() {
   }, [])
 
   const handleChooseFile = useCallback(() => {
-    fileInputRef.current?.click()
+    if (fileInputRef.current) {
+      fileInputRef.current.value = ''
+      fileInputRef.current.click()
+    }
   }, [])
 
   const handleFileChange = useCallback((event) => {
     const nextFile = event.target.files?.[0] || null
     setSelectedFile(nextFile)
     setError('')
+    event.target.value = ''
   }, [])
 
-  const handleAddStory = useCallback(async (event) => {
-    event.preventDefault()
-
+  const submitStory = useCallback(async ({ forceFileOnly = false } = {}) => {
     const trimmedUrl = storyUrl.trim()
-    const hasUrl = trimmedUrl.length > 0
+    const hasUrl = !forceFileOnly && trimmedUrl.length > 0
     const hasFile = !!selectedFile
 
     if (!hasUrl && !hasFile) {
@@ -175,11 +177,22 @@ export default function Stories() {
     setError('')
 
     try {
+      console.log('Story upload start', {
+        hasFile,
+        hasUrl,
+        selectedFileName: selectedFile?.name,
+        selectedFileType: selectedFile?.type,
+        selectedFileSize: selectedFile?.size,
+        storyUrl: trimmedUrl
+      })
+
       const finalImageUrl = hasFile
         ? await uploadImageToCloudinary(selectedFile)
         : trimmedUrl
 
-      await apiFetch('/api/stories', {
+      console.log('Story final image URL', finalImageUrl)
+
+      const savedStory = await apiFetch('/api/stories', {
         method: 'POST',
         body: JSON.stringify({
           imageUrl: finalImageUrl,
@@ -187,14 +200,34 @@ export default function Stories() {
         })
       })
 
+      console.log('Story backend save response', savedStory)
+
       resetStoryForm()
       await loadStories()
     } catch (err) {
+      console.error('Story upload failed', err)
       setError(err.message)
     } finally {
       setIsSubmitting(false)
     }
   }, [currentUser?.id, loadStories, resetStoryForm, selectedFile, storyUrl])
+
+  const handleAddStory = useCallback(async (event) => {
+    event.preventDefault()
+    await submitStory()
+  }, [submitStory])
+
+  const handleUploadSelectedFile = useCallback(async () => {
+    if (!selectedFile || isSubmitting) return
+    await submitStory({ forceFileOnly: true })
+  }, [isSubmitting, selectedFile, submitStory])
+
+  const handleStoryInputKeyDown = (event) => {
+    if (event.key !== 'Enter' || event.shiftKey) return
+    event.preventDefault()
+    if (isSubmitting) return
+    void handleAddStory(event)
+  }
 
   const selectedStoryIndex = selectedStory
     ? visibleStories.findIndex(story => story.id === selectedStory.id)
@@ -202,6 +235,11 @@ export default function Stories() {
 
   return (
     <div className="stories-container">
+      {!import.meta.env.VITE_CLOUDINARY_CLOUD_NAME || !import.meta.env.VITE_CLOUDINARY_UPLOAD_PRESET ? (
+        <p className="story-error">
+          File upload is not configured. Add `VITE_CLOUDINARY_CLOUD_NAME` and `VITE_CLOUDINARY_UPLOAD_PRESET` to the root `.env`.
+        </p>
+      ) : null}
       {error && <p className="story-error">{error}</p>}
       {(loading || isSubmitting) && (
         <p className="story-loading">
@@ -280,16 +318,13 @@ export default function Stories() {
         </div>
       ) : (
         <>
-          <form
-            onSubmit={handleAddStory}
-            className="mb-4 rounded-3xl border border-slate-200 bg-white p-4 shadow-sm"
-          >
-            <div className="flex flex-col gap-3 md:flex-row md:items-center">
+          <form onSubmit={handleAddStory} className="story-upload-form">
+            <div className="story-upload-row">
               <button
                 type="button"
                 onClick={handleChooseFile}
                 disabled={isSubmitting}
-                className="inline-flex h-11 items-center justify-center rounded-full border border-slate-300 px-4 text-sm font-medium text-slate-700 transition hover:bg-slate-50 disabled:cursor-not-allowed disabled:opacity-60"
+                className="story-select-btn"
               >
                 Choose File
               </button>
@@ -302,12 +337,21 @@ export default function Stories() {
                 className="hidden"
               />
 
-              <span className="min-h-6 text-sm text-slate-500">
+              <span className="story-file-name">
                 {selectedFile ? selectedFile.name : 'No file selected'}
               </span>
+
+              <button
+                type="button"
+                onClick={handleUploadSelectedFile}
+                disabled={!selectedFile || isSubmitting}
+                className="story-upload-btn"
+              >
+                {isSubmitting && selectedFile ? 'Uploading Story...' : 'Upload Story'}
+              </button>
             </div>
 
-            <div className="mt-3 flex flex-col gap-3 md:flex-row">
+            <div className="story-upload-row story-upload-row-secondary">
               <input
                 type="url"
                 value={storyUrl}
@@ -317,23 +361,29 @@ export default function Stories() {
                     setError('')
                   }
                 }}
+                onKeyDown={handleStoryInputKeyDown}
                 placeholder="Paste Image URL"
                 disabled={isSubmitting}
-                className="h-11 flex-1 rounded-full border border-slate-300 px-4 text-sm text-slate-800 outline-none transition placeholder:text-slate-400 focus:border-sky-500 disabled:cursor-not-allowed disabled:opacity-60"
+                className="story-url-input"
               />
 
               <button
                 type="submit"
                 disabled={isSubmitting}
-                className="inline-flex h-11 items-center justify-center rounded-full bg-sky-500 px-5 text-sm font-semibold text-white transition hover:bg-sky-600 disabled:cursor-not-allowed disabled:bg-sky-300"
+                className="story-submit-btn"
               >
-                {isSubmitting ? 'Adding Story...' : 'Add Story'}
+                {isSubmitting && !selectedFile ? 'Adding Story...' : 'Add Story'}
               </button>
             </div>
 
-            <p className="mt-2 text-xs text-slate-500">
+            <p className="story-helper-text">
               Paste an image URL or choose a file. If both are provided, the uploaded file is used.
             </p>
+            {selectedFile ? (
+              <p className="story-helper-text">
+                File selected. Click Upload Story to upload it.
+              </p>
+            ) : null}
           </form>
 
           <div className="stories-list">

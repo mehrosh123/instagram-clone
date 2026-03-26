@@ -93,9 +93,35 @@
 .file-upload-label {
   font-size: 13px;
   color: var(--text-color);
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  min-height: 40px;
+  padding: 0 16px;
+  border: 1px solid var(--border-color);
+  border-radius: 999px;
+  background: #fff;
+}
+
+.post-upload-row {
   display: flex;
-  flex-direction: column;
-  gap: 6px;
+  align-items: center;
+  gap: 10px;
+  flex-wrap: wrap;
+}
+
+.post-file-name {
+  font-size: 12px;
+  color: #666;
+}
+
+.post-upload-btn {
+  align-self: center;
+  background: var(--primary-color);
+  color: #fff;
+  border-radius: 999px;
+  padding: 8px 16px;
+  font-weight: 600;
 }
 
 .upload-hint {

@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useMemo, useState } from 'react'
+import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
 import Post from './Post'
 import Stories from './Stories'
 import { apiFetch } from '../api/client'
@@ -19,6 +19,7 @@ import '../styles/Feed.css'
 
 export default function Feed({ onOpenProfile }) {
   const { currentUser } = useAuth()
+  const postFileInputRef = useRef(null)
   const [posts, setPosts] = useState([])
   const [pendingLikePostIds, setPendingLikePostIds] = useState([])
   const [isLoading, setIsLoading] = useState(true)
@@ -328,6 +329,14 @@ export default function Feed({ onOpenProfile }) {
     if (files.length === 0) return
 
     setSelectedFiles(prev => [...prev, ...files].slice(0, 10))
+    e.target.value = ''
+  }
+
+  const handleChoosePostFiles = () => {
+    if (postFileInputRef.current) {
+      postFileInputRef.current.value = ''
+      postFileInputRef.current.click()
+    }
   }
 
   const handleCreatePost = async (e) => {
@@ -370,6 +379,9 @@ export default function Feed({ onOpenProfile }) {
       setCaption('')
       setImagesInput('')
       setSelectedFiles([])
+      if (postFileInputRef.current) {
+        postFileInputRef.current.value = ''
+      }
       setIsCreateModalOpen(false)
       await loadFeed()
     } catch (err) {
@@ -378,6 +390,22 @@ export default function Feed({ onOpenProfile }) {
       setPosting(false)
       setUploadingFiles(false)
     }
+  }
+
+  const handleUploadSelectedPostFiles = async () => {
+    if (selectedFiles.length === 0 || posting || uploadingFiles) return
+
+    const syntheticEvent = {
+      preventDefault() {}
+    }
+    await handleCreatePost(syntheticEvent)
+  }
+
+  const handleCreatePostFromKeyboard = (event) => {
+    if (event.key !== 'Enter' || event.shiftKey) return
+    event.preventDefault()
+    if (posting || uploadingFiles) return
+    void handleCreatePost(event)
   }
 
   const handleEditPost = async (postId) => {
@@ -437,6 +465,7 @@ export default function Feed({ onOpenProfile }) {
                 <textarea
                   value={imagesInput}
                   onChange={(e) => setImagesInput(e.target.value)}
+                  onKeyDown={handleCreatePostFromKeyboard}
                   placeholder="Cloudinary image URLs (one per line or comma-separated)"
                   rows={4}
                 />
@@ -452,10 +481,34 @@ export default function Feed({ onOpenProfile }) {
                   </div>
                 )}
 
-                <label className="file-upload-label">
-                  Upload image files
-                  <input type="file" accept="image/*" multiple onChange={handleFileUpload} />
-                </label>
+                <div className="post-upload-row">
+                  <button
+                    type="button"
+                    className="file-upload-label"
+                    onClick={handleChoosePostFiles}
+                  >
+                    Choose Files
+                  </button>
+                  <input
+                    ref={postFileInputRef}
+                    type="file"
+                    accept="image/*"
+                    multiple
+                    onChange={handleFileUpload}
+                    style={{ display: 'none' }}
+                  />
+                  <span className="post-file-name">
+                    {selectedFiles.length > 0 ? selectedFiles.map(file => file.name).join(', ') : 'No file selected'}
+                  </span>
+                  <button
+                    type="button"
+                    className="post-upload-btn"
+                    disabled={selectedFiles.length === 0 || posting || uploadingFiles}
+                    onClick={handleUploadSelectedPostFiles}
+                  >
+                    {posting && uploadingFiles ? 'Uploading Post...' : 'Upload Post'}
+                  </button>
+                </div>
 
                 <small className="upload-hint">
                   {uploadingFiles
@@ -464,7 +517,7 @@ export default function Feed({ onOpenProfile }) {
                 </small>
 
                 {selectedFiles.length > 0 && (
-                  <small className="upload-hint">Files: {selectedFiles.map(file => file.name).join(', ')}</small>
+                  <small className="upload-hint">Click Upload Post or Post to publish the selected file(s).</small>
                 )}
 
                 <button type="submit" disabled={posting || uploadingFiles}>
